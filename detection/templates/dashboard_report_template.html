@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Threat Dashboard Report</title>
+    <style>
+        body { font-family: sans-serif; }
+        h1 { color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #999; padding: 8px; text-align: left; }
+        th { background-color: #eee; }
+    </style>
+</head>
+<body>
+    <h1>Threat Detection Dashboard Report</h1>
+    <p><strong>Total Scans:</strong> {{ total_scans }}</p>
+    <p><strong>Total Threats Detected:</strong> {{ total_threats }}</p>
+
+    <h2>Threat Breakdown</h2>
+    <table>
+        <thead>
+            <tr><th>Threat Type</th><th>Count</th></tr>
+        </thead>
+        <tbody>
+            {% for type, count in threat_breakdown.items %}
+            <tr><td>{{ type }}</td><td>{{ count }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Top Keywords in Threats</h2>
+    <table>
+        <thead>
+            <tr><th>Keyword</th><th>Occurrences</th></tr>
+        </thead>
+        <tbody>
+            {% for keyword, count in common_keywords %}
+            <tr><td>{{ keyword }}</td><td>{{ count }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

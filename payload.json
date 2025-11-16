@@ -1,0 +1,6 @@
+{
+  "to": "test@example.com",
+  "subject": "Alert",
+  "message": "Breach detected!"
+}
+

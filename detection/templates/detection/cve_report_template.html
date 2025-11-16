@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>CVE Classification Report</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        h1 { color: #2c3e50; }
+        .section { margin-bottom: 20px; }
+        .label { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>CVE Classification Report</h1>
+
+    <div class="section">
+        <p><span class="label">Label:</span> {{ classification.label }}</p>
+        <p><span class="label">Confidence:</span> {{ classification.confidence|floatformat:2 }}</p>
+        <p><span class="label">Classified At:</span> {{ classification.classified_at }}</p>
+    </div>
+
+    <div class="section">
+        <p><span class="label">Input Text:</span></p>
+        <p>{{ classification.input_text }}</p>
+    </div>
+
+    <div class="section">
+        <p><span class="label">Extracted Keywords:</span></p>
+        <ul>
+            {% for keyword in classification.keywords %}
+                <li>{{ keyword }}</li>
+            {% empty %}
+                <li>No keywords found.</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

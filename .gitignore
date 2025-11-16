@@ -1,0 +1,19 @@
+# Python env
+venv/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# DB / media / logs
+db.sqlite3
+*.sqlite3
+media/
+uploads/
+*.log
+
+# Node stuff (if present)
+node_modules/
+
+# Big ML models – keep OUT of git
+detection/ml_models/
