@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from .models import ThreatDetection, ReportEmailLog
 from .serializers import ThreatDetectionUploadSerializer
@@ -9,18 +9,6 @@ from .utils import  send_detection_report_email
 from .models import CVEClassification 
 import os
 import joblib
-
-# Optional WeasyPrint support (for PDF generation). This may fail on Windows
-# if system libraries like GTK/Pango aren't installed; in that case we just
-# disable PDF features instead of crashing the whole backend.
-try:
-    from weasyprint import HTML  # type: ignore
-    WEASYPRINT_AVAILABLE = True
-except Exception as e:  # ImportError, OSError, etc.
-    HTML = None  # type: ignore
-    WEASYPRINT_AVAILABLE = False
-    WEASYPRINT_IMPORT_ERROR = e
-
 
 # Path to trained model
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'ml_models', 'threat_model.pkl')
@@ -243,6 +231,7 @@ class DashboardSummaryAPIView(APIView):
 
 
 from django.template.loader import render_to_string
+from weasyprint import HTML
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 
@@ -252,22 +241,15 @@ class PDFReportAPIView(APIView):
     def get(self, request, pk):
         detection = get_object_or_404(ThreatDetection, pk=pk)
 
-        html_string = render_to_string(
-            "detection/report_template.html",
-            {"detection": detection},
-        )
-
-        # If WeasyPrint isn't available, just return the HTML instead of crashing
-        if not WEASYPRINT_AVAILABLE or HTML is None:
-            return HttpResponse(html_string)
-
+        html_string = render_to_string('detection/report_template.html', {'detection': detection})
         pdf_file = HTML(string=html_string).write_pdf()
 
-        response = HttpResponse(pdf_file, content_type="application/pdf")
-        response["Content-Disposition"] = f'filename="report_{detection.id}.pdf"'
+        response = HttpResponse(pdf_file, content_type='application/pdf')
+        response['Content-Disposition'] = f'filename="report_{detection.id}.pdf"'
         return response
 
 from django.core.mail import EmailMessage
+from weasyprint import HTML
 from django.template.loader import render_to_string
 
 class PDFReportEmailView(APIView):
@@ -277,42 +259,35 @@ class PDFReportEmailView(APIView):
         try:
             detection = ThreatDetection.objects.get(pk=pk)
         except ThreatDetection.DoesNotExist:
-            return Response({"error": "Detection not found"}, status=404)
+            return Response({'error': 'Detection not found'}, status=404)
 
-        html_content = render_to_string(
-            "detection/report_template.html",
-            {"detection": detection},
-        )
+        # Render HTML template to string
+        html_content = render_to_string("detection/report_template.html", {"detection": detection})
 
-        recipient_email = request.query_params.get("email", "your_email@gmail.com")
+        # Generate PDF
+        pdf_file = HTML(string=html_content).write_pdf()
 
-        # Compose base email
+        # Email recipient (for now, hardcoded or passed as query param)
+        recipient_email = request.query_params.get('email', 'your_email@gmail.com')
+
+        # Compose email
         email = EmailMessage(
             subject=f"Threat Detection Report for {detection.file_name}",
-            body="Attached is the PDF report for the threat detection scan."
-                 if WEASYPRINT_AVAILABLE and HTML is not None
-                 else "PDF generation is not available on this system, so the report is in the email body.",
+            body="Attached is the PDF report for the threat detection scan.",
             from_email=None,
-            to=[recipient_email],
+            to=[recipient_email]
         )
-
-        # Attach PDF only if WeasyPrint is available
-        if WEASYPRINT_AVAILABLE and HTML is not None:
-            pdf_file = HTML(string=html_content).write_pdf()
-            email.attach(f"report_{detection.id}.pdf", pdf_file, "application/pdf")
-        else:
-            # Fallback: include the HTML in the body
-            email.body += "\n\n" + html_content
+        email.attach(f"report_{detection.id}.pdf", pdf_file, 'application/pdf')
 
         try:
             email.send()
-            # adjust this line if your model field is called 'recipient_email' instead of 'email'
             ReportEmailLog.objects.create(detection=detection, email=recipient_email)
-            return Response({"message": "Email sent successfully."})
+            return Response({'message': 'Email sent successfully.'})
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+            return Response({'error': str(e)}, status=500)
 
 from django.template.loader import render_to_string
+from weasyprint import HTML
 from django.http import HttpResponse
 import tempfile
 
@@ -345,26 +320,19 @@ class DashboardPDFReportView(APIView):
                 explanation_counter.update(explanation)
 
         # Render HTML
-        html_string = render_to_string(
-            "dashboard_report_template.html",
-            {
-                "total_scans": total_scans,
-                "total_threats": total_threats,
-                "threat_breakdown": dict(threat_types),
-                "common_keywords": explanation_counter.most_common(10),
-            },
-        )
-
-        # If WeasyPrint isn't available, just return the HTML dashboard
-        if not WEASYPRINT_AVAILABLE or HTML is None:
-            return HttpResponse(html_string)
+        html_string = render_to_string("dashboard_report_template.html", {
+            "total_scans": total_scans,
+            "total_threats": total_threats,
+            "threat_breakdown": dict(threat_types),
+            "common_keywords": explanation_counter.most_common(10),
+        })
 
         # Generate PDF
         with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
             HTML(string=html_string).write_pdf(target=output.name)
             output.seek(0)
             response = HttpResponse(output.read(), content_type="application/pdf")
-            response["Content-Disposition"] = 'inline; filename="dashboard_report.pdf"'
+            response['Content-Disposition'] = 'inline; filename="dashboard_report.pdf"'
             return response
 
 from django.views import View
@@ -492,17 +460,3 @@ class CVEClassifyAPIView(APIView):
             "keywords": keywords,
             "classified_at": classification.classified_at,
         })
-
-class HealthCheckAPIView(APIView):
-    """
-    Very simple health check. No auth, just returns JSON if the backend is alive.
-    """
-    permission_classes = [AllowAny]
-
-    def get(self, request, *args, **kwargs):
-        return Response(
-            {
-                "status": "ok",
-                "service": "cybersecurity_ai_platform",
-            }
-        )
