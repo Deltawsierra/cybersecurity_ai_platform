@@ -1,4 +1,5 @@
 from django.contrib import admin
+from .api_views import health
 from detection.views import AdminDashboardView, HealthCheckAPIView
 from django.urls import path, include
 from rest_framework_simplejwt.views import (
@@ -9,6 +10,7 @@ from rest_framework_simplejwt.views import (
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/health/", HealthCheckAPIView.as_view(), name="api-health"),
+    path("api/health/", health, name="api_health"),
     path('admin-dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
