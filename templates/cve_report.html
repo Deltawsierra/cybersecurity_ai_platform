@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>CVE Classification Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        h1 { color: #333; }
+        .label { font-weight: bold; }
+        .box {
+            border: 1px solid #ccc;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>CVE Classification Report</h1>
+
+<div class="box">
+    <p><span class="label">Result ID:</span> {{ cve.id }}</p>
+    <p><span class="label">Created:</span> {{ cve.classified_at }}</p>
+</div>
+
+<div class="box">
+    <p><span class="label">Label:</span> {{ result.label }}</p>
+    <p><span class="label">Confidence:</span> {{ result.confidence }}</p>
+    <p><span class="label">Engine Version:</span> {{ result.engine_version }}</p>
+</div>
+
+<div class="box">
+    <p class="label">Input Text</p>
+    <pre>{{ cve.input_text }}</pre>
+</div>
+
+</body>
+</html>

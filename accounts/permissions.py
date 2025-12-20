@@ -1,21 +1,44 @@
-from rest_framework import permissions
+from rest_framework.permissions import BasePermission
 
-class IsAdmin(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == 'admin'
 
-class IsAnalyst(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == 'analyst'
+class IsAuthenticatedWithRole(BasePermission):
+    """
+    Base permission: user must be authenticated and have a role attribute.
+    """
 
-class IsViewer(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == 'viewer'
+        user = request.user
+        return bool(user and user.is_authenticated and hasattr(user, "role"))
 
-class IsAdminOrAnalyst(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role in ['admin', 'analyst']
 
-class IsAnyRole(permissions.BasePermission):
+class IsAdmin(IsAuthenticatedWithRole):
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role in ['admin', 'analyst', 'viewer']
+        return super().has_permission(request, view) and request.user.is_admin
+
+
+class IsAnalyst(IsAuthenticatedWithRole):
+    def has_permission(self, request, view):
+        return super().has_permission(request, view) and request.user.is_analyst
+
+
+class IsViewer(IsAuthenticatedWithRole):
+    def has_permission(self, request, view):
+        return super().has_permission(request, view) and request.user.is_viewer
+
+
+class IsAdminOrAnalyst(IsAuthenticatedWithRole):
+    def has_permission(self, request, view):
+        return (
+            super().has_permission(request, view)
+            and (request.user.is_admin or request.user.is_analyst)
+        )
+
+
+class IsAnyRole(IsAuthenticatedWithRole):
+    """
+    Any authenticated user with a valid role.
+    """
+
+    def has_permission(self, request, view):
+        return super().has_permission(request, view)
+

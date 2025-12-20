@@ -1,43 +1,63 @@
 from rest_framework import serializers
-from .models import ThreatDetection
-from .models import CVEClassification 
+from .models import ThreatDetection, CVEClassifyResult
 
-class ThreatDetectionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ThreatDetection
-        fields = '__all__'
+
+# =========================================================
+# DEFENDER — INPUT SERIALIZERS
+# =========================================================
 
 class ThreatDetectionScanSerializer(serializers.Serializer):
-    file_name = serializers.CharField()
+    """
+    Text-based defender scan input.
+    """
     content = serializers.CharField()
 
-class ScanUploadSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ThreatDetection
-        fields = ['id', 'file_name', 'uploaded_file', 'threat_type', 'confidence', 'detected', 'scanned_at']
-        read_only_fields = ['id', 'scanned_at', 'detected', 'threat_type', 'confidence']
 
 class ThreatDetectionUploadSerializer(serializers.Serializer):
+    """
+    File-based defender scan input.
+    """
     uploaded_file = serializers.FileField()
-    file_name = serializers.CharField(max_length=255)
-    
-    def create(self, validated_data):
-        # Simulate AI threat detection
-        file = validated_data.get('uploaded_file')
-        filename = file.name if file else 'unknown'
 
-        # Fake "AI" logic
-        threat_detected = "trojan" in filename.lower()
-        threat_type = "Trojan" if threat_detected else "Benign"
-        confidence = 0.95 if threat_detected else 0.1
 
-        validated_data['file_name'] = filename
-        validated_data['threat_type'] = threat_type
-        validated_data['confidence'] = confidence
-        validated_data['detected'] = threat_detected
-        return super().create(validated_data)
-    
-class CVEClassificationSerializer(serializers.ModelSerializer):
+class ThreatDetectionSerializer(serializers.ModelSerializer):
+    """
+    Minimal read-only serializer for Defender detections.
+    Django does not interpret engine results.
+    """
+
     class Meta:
-        model = CVEClassification
-        fields = '__all__'
+        model = ThreatDetection
+        fields = (
+            "id",
+            "detected",
+            "engine_response",
+        )
+        read_only_fields = fields
+
+
+
+
+# =========================================================
+# CVE CLASSIFICATION
+# =========================================================
+
+class CVEClassifyInputSerializer(serializers.Serializer):
+    """
+    Input payload for CVE classification.
+    """
+    text = serializers.CharField()
+
+
+class CVEClassifyResultSerializer(serializers.ModelSerializer):
+    """
+    Read-only CVE classification output.
+    """
+
+    class Meta:
+        model = CVEClassifyResult
+        fields = "__all__"
+
+
+    
+

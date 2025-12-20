@@ -1,36 +1,76 @@
 from django.db import models
 
+
+# =========================================================
+# DEFENDER (ENGINE-BACKED)
+# =========================================================
+
 class ThreatDetection(models.Model):
+    """
+    Stores a single defender (blue-team) analysis result.
+    The engine_response is the source of truth.
+    """
+
     file_name = models.CharField(max_length=255)
-    uploaded_file = models.FileField(upload_to='uploads/', null=True, blank=True)
-    threat_type = models.CharField(max_length=100)
-    confidence = models.FloatField()
     detected = models.BooleanField(default=False)
+    engine_response = models.JSONField(default=dict, blank=True)
     scanned_at = models.DateTimeField(auto_now_add=True)
 
-    explanation = models.JSONField(default=list, blank=True, null=True)
+    class Meta:
+        ordering = ["-scanned_at"]
+        indexes = [
+            models.Index(fields=["detected"]),
+            models.Index(fields=["scanned_at"]),
+        ]
 
     def __str__(self):
-        return self.file_name
+        return f"{self.file_name} ({'detected' if self.detected else 'clean'})"
+
+
+# =========================================================
+# EMAIL LOGGING
+# =========================================================
 
 class ReportEmailLog(models.Model):
-    detection = models.ForeignKey(ThreatDetection, on_delete=models.CASCADE)
+    """
+    Records when a report was emailed and to whom.
+    """
+
+    detection = models.ForeignKey(
+        ThreatDetection,
+        on_delete=models.CASCADE,
+        related_name="email_logs",
+    )
     recipient_email = models.EmailField()
     sent_at = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"Report sent to {self.email} for scan ID {self.detection.id}"
-    
-    
-class CVEClassification(models.Model):
-     input_text = models.TextField()
-     label = models.CharField(max_length=100)
-     confidence = models.FloatField()
-     keywords = models.JSONField()
-     classified_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ["-sent_at"]
 
-     def __str__(self):
-        return f"{self.label} ({self.confidence})"
+    def __str__(self):
+        return f"Report sent to {self.recipient_email} for detection {self.detection.id}"
+
+
+# =========================================================
+# CVE CLASSIFICATION (ENGINE-BACKED)
+# =========================================================
+
+class CVEClassifyResult(models.Model):
+    """
+    Stores CVE classification results returned by the engine.
+    """
+
+    input_text = models.TextField()
+    engine_response = models.JSONField(default=dict, blank=True)
+    classified_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-classified_at"]
+
+    def __str__(self):
+        return f"CVE classification {self.id}"
+
+
 
 
 
