@@ -52,6 +52,7 @@ MIDDLEWARE = [
 
     # Audit request metadata (IP, UA, path, method, request_id)
     "audit.middleware.RequestMetadataMiddleware",
+    "audit.middleware.DefenderMiddleware",
 
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -178,6 +179,13 @@ CYBERENGINE_URL = os.environ.get(
 )
 
 CYBERENGINE_OPERATOR_KEY = os.environ.get("CYBERENGINE_OPERATOR_KEY")
+
+# -------------------------------------------------------------------
+# AI DEFENDER (SAFE MODE) NOT AI LOGIC JUST A SAFETY SWITCH
+# -------------------------------------------------------------------
+
+DEFENDER_MONITOR_ONLY = True
+
 
 
 
