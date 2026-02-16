@@ -17,3 +17,9 @@ node_modules/
 
 # Big ML models – keep OUT of git
 detection/ml_models/
+
+.venv/
+venv/
+
+.venv/
+venv/
