@@ -39,7 +39,7 @@ class CyberEngineClient:
                 f"{self.base_url}{path}",
                 json=payload,
                 headers=self.headers,
-                timeout=30,  # prevent Django worker starvation
+                timeout=1000,  # prevent Django worker starvation
             )
         except requests.RequestException as e:
             raise EngineError(f"Engine unreachable: {e}")
