@@ -159,9 +159,9 @@ EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "dev@example.com")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "dev-password")
-DEFAULT_FROM_EMAIL = "Cybersecurity AI <noreply@cybersec.local>"
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "info@mythosaisecurity.com")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "tsnr pykj hzcv zduf")
+DEFAULT_FROM_EMAIL = "Mythos AI Security <noreply@infoai.local>"
 
 # -------------------------------------------------------------------
 # CORS
