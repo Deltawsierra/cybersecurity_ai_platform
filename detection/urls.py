@@ -1,26 +1,79 @@
-from django.urls import path, include
-from .views import ThreatFileUploadView  
-from .views import MLScanOnlyAPIView
-from .views import DashboardSummaryAPIView
-from .views import PDFReportAPIView
-from .views import PDFReportEmailView
-from .views import DashboardPDFReportView
-from .views import AdminDashboardView
-from .views import CVEClassifyAPIView
+from django.urls import path
 
+from .views import (
+    DefenderTextScanAPIView,
+    DefenderFileScanAPIView,
+    DefenderListAPIView,
+    DefenderDetailAPIView,
+    CVEClassifyAPIView,
+    CVEClassifyListAPIView,
+    CVEClassifyDetailAPIView,
+    CVEPDFAPIView,
+    CVEEmailAPIView,
+)
+
+app_name = "detection"
 
 urlpatterns = [
-    path('upload/', ThreatFileUploadView.as_view(), name='threat-upload'),
-    path('scan/', MLScanOnlyAPIView.as_view(), name='ml_scan'),
-    path('dashboard/summary/', DashboardSummaryAPIView.as_view(), name='dashboard-summary'),
-    path('report/<int:pk>/pdf/', PDFReportAPIView.as_view(), name='pdf-report'),
-    path('report/<int:pk>/email/', PDFReportEmailView.as_view(), name='report-email'),
-    path('dashboard/pdf/', DashboardPDFReportView.as_view(), name='dashboard-pdf'),
-    path('admin-dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
-    path('classify-cve/', CVEClassifyAPIView.as_view(), name='classify-cve'), 
-    path('api/pentest/', include('pentest.urls')),
- 
-    # path('scan/', ThreatDetectionListCreateView.as_view(), name='threat-scan'),  # optional if re-added later
+    # =================================================
+    # DEFENDER (BLUE TEAM)
+    # =================================================
+    path(
+        "defender/text/",
+        DefenderTextScanAPIView.as_view(),
+        name="defender-text-scan",
+    ),
+    path(
+        "defender/file/",
+        DefenderFileScanAPIView.as_view(),
+        name="defender-file-scan",
+    ),
+    path(
+        "defender/",
+        DefenderListAPIView.as_view(),
+        name="defender-list",
+    ),
+    path(
+        "defender/<int:pk>/",
+        DefenderDetailAPIView.as_view(),
+        name="defender-detail",
+    ),
+
+    # =================================================
+    # CVE CLASSIFICATION
+    # =================================================
+    path(
+        "cve/classify/",
+        CVEClassifyAPIView.as_view(),
+        name="cve-classify",
+    ),
+    path(
+        "cve/",
+        CVEClassifyListAPIView.as_view(),
+        name="cve-list",
+    ),
+    path(
+        "cve/<int:pk>/",
+        CVEClassifyDetailAPIView.as_view(),
+        name="cve-detail",
+    ),
+    path(
+        "cve/<int:pk>/pdf/",
+        CVEPDFAPIView.as_view(),
+        name="cve-pdf",
+    ),
+    path(
+        "cve/<int:pk>/email/",
+        CVEEmailAPIView.as_view(),
+        name="cve-email",
+    ),
 ]
+
+
+
+
+    
+
+
 
 

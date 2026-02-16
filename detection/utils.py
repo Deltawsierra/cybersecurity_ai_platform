@@ -1,82 +1,72 @@
-from django.core.mail import EmailMessage
-from django.template.loader import render_to_string
-from .models import ThreatDetection, ReportEmailLog
-from .models import CVEClassification
+import json
+from io import BytesIO
 
-try:
-    from weasyprint import HTML, CSS  # CSS may or may not be used; safe to import
-    WEASYPRINT_AVAILABLE = True
-except Exception as e:  # catches ImportError, OSError, etc.
-    HTML = None  # type: ignore
-    CSS = None   # type: ignore
-    WEASYPRINT_AVAILABLE = False
-    WEASYPRINT_IMPORT_ERROR = e
-
-def send_detection_report_email(detection_id, recipient_email):
-    # If WeasyPrint isn't usable (missing native libs), skip PDF generation
-    if not WEASYPRINT_AVAILABLE:
-        print(
-            "send_detection_report_email: PDF generation skipped – "
-            "WeasyPrint is not available:",
-            WEASYPRINT_IMPORT_ERROR,
-        )
-        return
-
-    try:
-        detection = ThreatDetection.objects.get(pk=detection_id)
-    except ThreatDetection.DoesNotExist:
-        return
-
-    html_content = render_to_string(
-        "detection/report_template.html",
-        {"detection": detection},
-    )
-    pdf_file = HTML(string=html_content).write_pdf()
-
-    email = EmailMessage(
-        subject=f"Threat Detection Report: {detection.file_name}",
-        body="Attached is the PDF report for the scan.",
-        from_email=None,  # uses DEFAULT_FROM_EMAIL
-        to=[recipient_email],
-    )
-    email.attach(f"report_{detection.id}.pdf", pdf_file, "application/pdf")
-    email.send()
-
-    # Optional: Log it
-    ReportEmailLog.objects.create(
-        detection=detection,
-        recipient_email=recipient_email,
-    )
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
 
 
-def send_cve_pdf_report(classification_id, recipient_email):
-    # If WeasyPrint isn't usable, skip instead of crashing
-    if not WEASYPRINT_AVAILABLE:
-        print(
-            "send_cve_pdf_report: PDF generation skipped – "
-            "WeasyPrint is not available:",
-            WEASYPRINT_IMPORT_ERROR,
-        )
-        return
+def generate_cve_pdf(cve):
+    """
+    Render a CVE classification result into a PDF using ReportLab.
+    Returns (filename, pdf_bytes).
+    """
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
 
-    classification = CVEClassification.objects.get(id=classification_id)
+    width, height = letter
+    x = 0.75 * inch
+    y = height - 0.75 * inch
+    line_height = 14
 
-    html = render_to_string(
-        "detection/cve_report_template.html",
-        {"classification": classification},
-    )
-    pdf_file = HTML(string=html).write_pdf()
+    def draw(text, font="Helvetica", size=11):
+        nonlocal y
+        c.setFont(font, size)
+        text = "" if text is None else str(text)
+        max_chars = 110
 
-    email = EmailMessage(
-        subject=f"CVE Classification Report: {classification.label}",
-        body="Please find the attached CVE report.",
-        from_email=None,
-        to=[recipient_email],
-    )
-    email.attach("cve_report.pdf", pdf_file, "application/pdf")
-    email.send()
+        while len(text) > max_chars:
+            c.drawString(x, y, text[:max_chars])
+            y -= line_height
+            text = text[max_chars:]
+            if y < 0.75 * inch:
+                c.showPage()
+                y = height - 0.75 * inch
+                c.setFont(font, size)
 
+        c.drawString(x, y, text)
+        y -= line_height
+        if y < 0.75 * inch:
+            c.showPage()
+            y = height - 0.75 * inch
 
-def send_cve_report_email(classification_id, recipient_email):
-    send_cve_pdf_report(classification_id, recipient_email)
+    engine = cve.engine_response or {}
 
+    # Header
+    draw("CVE Classification Report", font="Helvetica-Bold", size=16)
+    y -= 6
+    draw(f"Classification ID: {cve.id}")
+    draw(f"Classified at: {cve.classified_at}")
+    y -= 10
+
+    # Input text (truncated)
+    draw("Input Text", font="Helvetica-Bold", size=13)
+    input_text = (cve.input_text or "")[:2000]
+    for line_text in input_text.splitlines():
+        draw(line_text, size=9)
+    y -= 8
+
+    # Engine response
+    draw("Engine Response", font="Helvetica-Bold", size=13)
+    raw = json.dumps(engine, indent=2)[:8000]
+    for line_text in raw.splitlines():
+        draw(line_text, size=8)
+
+    c.showPage()
+    c.save()
+
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    filename = f"cve_{cve.id}.pdf"
+    return filename, pdf_bytes

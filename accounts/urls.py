@@ -1,14 +1,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from accounts.views import AdminOnlyView, AnalystOnlyView, ViewerOnlyView, UserViewSet
+from accounts.views import UserViewSet
+
+app_name = "accounts"
 
 router = DefaultRouter()
-router.register(r'users', UserViewSet, basename='user')
+router.register(r"users", UserViewSet, basename="user")
 
 urlpatterns = [
-    path('', include(router.urls)),
-    path('admin-only/', AdminOnlyView.as_view()),
-    path('analyst-only/', AnalystOnlyView.as_view()),
-    path('viewer-only/', ViewerOnlyView.as_view()),
-    
+    path("", include(router.urls)),
 ]
+
