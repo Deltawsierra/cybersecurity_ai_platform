@@ -20,6 +20,12 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsAdmin]
 
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def me(self, request):
+      """Return the currently authenticated user's profile."""
+      serializer = self.get_serializer(request.user)
+      return Response(serializer.data)
+
     @action(detail=True, methods=["patch"])
     def set_role(self, request, pk=None):
         """
