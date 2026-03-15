@@ -19,7 +19,6 @@ class CyberEngineClient:
             "Content-Type": "application/json",
         }
 
-
     @classmethod
     def from_settings(cls):
         if not settings.CYBERENGINE_OPERATOR_KEY:
@@ -58,10 +57,23 @@ class CyberEngineClient:
     def run_scan(self, target: str) -> dict:
         return self._post("/api/scan", {"target": target})
 
+    def run_llm_scan(self, payload: dict) -> dict:
+        """
+        Run an LLM Target Red Team scan (multi-turn).
+        Payload example:
+          {
+            "target_name": "Client LLM",
+            "adapter": "openai_style",
+            "base_url": "https://client-proxy/v1/chat/completions",
+            "model": "gpt-4.1-mini",
+            "attacks": ["metaprompt_extraction","direct_prompt_injection","crescendosafe"],
+            "max_turns": 8
+          }
+        """
+        return self._post("/api/llm-scan", payload)
+
     def classify_cve(self, text: str) -> dict:
         return self._post("/api/classify-cve", {"text": text})
-
-
 
     def defend_log_text(self, text: str) -> dict:
         """
