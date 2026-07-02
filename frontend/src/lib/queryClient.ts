@@ -16,6 +16,14 @@ export function setLogoutHandler(fn: () => void) {
   onLogoutFn = fn;
 }
 
+function isDemoMode(): boolean {
+  try {
+    return localStorage.getItem("athena_demo_mode") === "true";
+  } catch {
+    return false;
+  }
+}
+
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   if (getTokenFn) {
@@ -49,7 +57,7 @@ async function fetchWithAuth(url: string, init: RequestInit = {}): Promise<Respo
 
   const res = await fetch(url, { ...init, headers, credentials: "include" });
 
-  if (res.status === 401 && onRefreshFn) {
+  if (res.status === 401 && onRefreshFn && !isDemoMode()) {
     const newToken = await tryRefreshToken();
     if (newToken) {
       headers.set("Authorization", `Bearer ${newToken}`);

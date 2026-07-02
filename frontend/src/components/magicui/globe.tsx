@@ -36,20 +36,23 @@ export function Globe({ className, config = {}, markers = [] }: GlobeProps) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
     const timer = requestAnimationFrame(() => {
       if (containerRef.current && containerRef.current.offsetWidth > 0) {
         setReady(true);
       } else {
-        const interval = setInterval(() => {
+        interval = setInterval(() => {
           if (containerRef.current && containerRef.current.offsetWidth > 0) {
             setReady(true);
-            clearInterval(interval);
+            if (interval) clearInterval(interval);
           }
         }, 100);
-        return () => clearInterval(interval);
       }
     });
-    return () => cancelAnimationFrame(timer);
+    return () => {
+      cancelAnimationFrame(timer);
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {

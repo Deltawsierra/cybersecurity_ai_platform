@@ -55,10 +55,8 @@ export function IconCloud({ icons = [], className }: IconCloudProps) {
       const opacity = 0.3 + (z2 + 1) * 0.35;
       const iconScale = 0.5 + (z2 + 1) * 0.3;
 
-      el.style.left = `calc(50% + ${projX * radius}px)`;
-      el.style.top = `calc(50% + ${projY * radius}px)`;
       el.style.opacity = String(opacity);
-      el.style.transform = `translate(-50%, -50%) scale(${iconScale})`;
+      el.style.transform = `translate(-50%, -50%) translate(${projX * radius}px, ${projY * radius}px) scale(${iconScale})`;
       el.style.zIndex = String(Math.round((z2 + 1) * 50));
     }
   }, [positions]);
@@ -107,6 +105,7 @@ export function IconCloud({ icons = [], className }: IconCloudProps) {
           key={i}
           ref={(el) => setIconRef(el, i)}
           className="absolute flex items-center justify-center"
+          style={{ left: "50%", top: "50%", willChange: "transform, opacity" }}
           data-testid={`cloud-icon-${i}`}
         >
           {icon}

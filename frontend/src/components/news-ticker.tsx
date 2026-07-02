@@ -1,5 +1,7 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Shield } from "lucide-react";
+import { toArray, toText } from "@/lib/safe";
 
 const fallbackNews = [
   "Athena AI monitoring active",
@@ -20,8 +22,11 @@ export function NewsTicker() {
     retry: false,
   });
 
-  const newsItems = newsData && newsData.length > 0 ? newsData : fallbackNews;
-  const doubled = [...newsItems, ...newsItems];
+  const doubled = useMemo(() => {
+    const items = toArray<unknown>(newsData).map(toText).filter(Boolean);
+    const base = items.length > 0 ? items : fallbackNews;
+    return [...base, ...base];
+  }, [newsData]);
 
   return (
     <div className="w-full bg-muted/50 dark:bg-[rgba(2,8,25,0.8)] border-b dark:border-b-[rgba(255,0,180,0.15)] overflow-hidden" data-testid="news-ticker">

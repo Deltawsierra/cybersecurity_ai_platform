@@ -321,10 +321,10 @@
     100% { opacity: 1; transform: scale(1); }
   }
 
-  .animate-ticker { animation: ticker-scroll 30s linear infinite; }
+  .animate-ticker { animation: ticker-scroll 30s linear infinite; will-change: transform; }
   .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
-  .animate-scan-line { animation: scan-line 3s ease-in-out infinite; }
-  .animate-float { animation: float 3s ease-in-out infinite; }
+  .animate-scan-line { animation: scan-line 3s ease-in-out infinite; will-change: transform; }
+  .animate-float { animation: float 3s ease-in-out infinite; will-change: transform; }
   .animate-shimmer { 
     background-size: 200% 100%;
     animation: shimmer 2s linear infinite; 
@@ -405,7 +405,7 @@
   }
 
   .animate-drift { animation: drift 20s ease-in-out infinite; }
-  .animate-rotate-slow { animation: rotate-slow 60s linear infinite; }
+  .animate-rotate-slow { animation: rotate-slow 60s linear infinite; will-change: transform; }
 
   .neon-text {
     text-shadow: 0 0 7px rgba(0, 230, 255, 0.6), 0 0 15px rgba(0, 230, 255, 0.3), 0 0 30px rgba(0, 230, 255, 0.15);

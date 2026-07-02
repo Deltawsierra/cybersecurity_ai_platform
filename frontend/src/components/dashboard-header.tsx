@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/navigation-menu";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import mythosLogo from "@/assets/mythos-icon-color.png";
+import mythosLogo from "@assets/mythos-icon-color_1771007289183.png";
 
 interface NavDropdownItem {
   label: string;

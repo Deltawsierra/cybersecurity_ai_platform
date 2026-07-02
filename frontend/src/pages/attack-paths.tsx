@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toText, toArray } from "@/lib/safe";
 
 const severityColor: Record<string, string> = {
   critical: "#ff4757",
@@ -199,7 +200,7 @@ function AttackPathGraph({ nodes: attackPathNodes, edges: attackPathEdges }: Att
             );
           })}
 
-          {attackPathNodes.map((node) => {
+          {attackPathNodes.map((node, index) => {
             const x = cx(node.x);
             const y = cy(node.y);
             const color = nodeColorMap[node.type] || "#70a1ff";
@@ -208,7 +209,7 @@ function AttackPathGraph({ nodes: attackPathNodes, edges: attackPathEdges }: Att
             );
 
             return (
-              <g key={node.id} data-testid={`node-${node.id}`}
+              <g key={toText(node?.id) || index} data-testid={`node-${toText(node?.id)}`}
                 onMouseEnter={() => setHoveredNode(node.id)}
                 onMouseLeave={() => setHoveredNode(null)}
                 style={{ cursor: "pointer" }}>
@@ -248,7 +249,7 @@ function AttackPathGraph({ nodes: attackPathNodes, edges: attackPathEdges }: Att
                   fontSize="9"
                   fontWeight="500"
                 >
-                  {node.label}
+                  {toText(node?.label)}
                 </text>
               </g>
             );
@@ -261,10 +262,10 @@ function AttackPathGraph({ nodes: attackPathNodes, edges: attackPathEdges }: Att
           const connectedEdges = attackPathEdges.filter(e => e.from === node.id || e.to === node.id);
           const compromisedCount = connectedEdges.filter(e => e.status === "compromised").length;
           return (
-            <div className="mt-3 p-3 rounded-md border border-primary/20 bg-primary/5 animate-fade-in-up" data-testid={`node-detail-${node.id}`}>
+            <div className="mt-3 p-3 rounded-md border border-primary/20 bg-primary/5 animate-fade-in-up" data-testid={`node-detail-${toText(node?.id)}`}>
               <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-xs font-bold">{node.label}</span>
-                <Badge variant="secondary" className="text-[9px] no-default-hover-elevate no-default-active-elevate uppercase">{node.type}</Badge>
+                <span className="text-xs font-bold">{toText(node?.label)}</span>
+                <Badge variant="secondary" className="text-[9px] no-default-hover-elevate no-default-active-elevate uppercase">{toText(node?.type)}</Badge>
               </div>
               <div className="grid grid-cols-3 gap-2 text-[10px] text-muted-foreground mt-2">
                 <div><span className="font-medium">Connections:</span> {connectedEdges.length}</div>
@@ -543,7 +544,7 @@ function PentestProgress({ progress: pentestProgress }: PentestProgressProps) {
                 data-testid={`pentest-step-${i}`}
               >
                 <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${isActive ? "bg-[#00d2d3] animate-pulse-glow" : "bg-[#70a1ff]"}`} />
-                <span className="text-xs flex-1">{item.step}</span>
+                <span className="text-xs flex-1">{toText(item?.step)}</span>
                 <SeverityBadge severity={badge.severity} label={badge.label} />
               </div>
             );
@@ -629,7 +630,7 @@ function AttackPathModelingCard({ modeling: attackPathModeling, graphAnalysis }:
                   style={{ color: expColors[key] || "#70a1ff", fill: expColors[key] || "#70a1ff" }}
                 />
                 <span className="text-muted-foreground">{key}:</span>
-                <span className="font-semibold">{value}</span>
+                <span className="font-semibold">{toText(value)}</span>
               </div>
             ))}
           </div>
@@ -638,21 +639,21 @@ function AttackPathModelingCard({ modeling: attackPathModeling, graphAnalysis }:
         <div className="border-t border-border pt-3">
           <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Graph Analysis</p>
           <div className="space-y-2">
-            {graphAnalysis.map((item) => (
+            {graphAnalysis.map((item, index) => (
               <div
-                key={item.id}
+                key={toText(item?.id) || index}
                 className="flex items-center justify-between gap-2 text-xs"
-                data-testid={`cve-row-${item.id}`}
+                data-testid={`cve-row-${toText(item?.id)}`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <ChevronRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                  <span className="font-mono truncate">{item.id}</span>
+                  <span className="font-mono truncate">{toText(item?.id)}</span>
                   <span className="text-muted-foreground">|</span>
-                  <span className="text-muted-foreground uppercase">{item.severity}</span>
+                  <span className="text-muted-foreground uppercase">{toText(item?.severity)}</span>
                 </div>
                 <SeverityBadge
                   severity={item.label === "CRITICAL" ? "critical" : item.label === "EXPLOITED" ? "exploited" : "high"}
-                  label={item.label}
+                  label={toText(item?.label)}
                 />
               </div>
             ))}
@@ -1045,12 +1046,12 @@ export default function AttackPaths() {
     retry: false,
   });
 
-  const attackPathNodes = attackData?.nodes || [];
-  const attackPathEdges = attackData?.edges || [];
-  const pentestProgress = attackData?.pentest_progress || [];
+  const attackPathNodes = toArray<any>(attackData?.nodes);
+  const attackPathEdges = toArray<any>(attackData?.edges);
+  const pentestProgress = toArray<any>(attackData?.pentest_progress);
   const attackPathModeling = attackData?.modeling || { exploitationExperience: {} };
-  const graphAnalysis = attackData?.graph_analysis || [];
-  const exploitationSequence = attackData?.exploitation_sequence || [];
+  const graphAnalysis = toArray<any>(attackData?.graph_analysis);
+  const exploitationSequence = toArray<any>(attackData?.exploitation_sequence);
 
   if (isLoading) {
     return (

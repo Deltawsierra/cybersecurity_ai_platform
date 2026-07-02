@@ -1,5 +1,5 @@
 import CountUp from "react-countup";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, AreaChart, Area,
@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
+import { toText, toArray } from "@/lib/safe";
 
 const severityColor: Record<string, string> = {
   critical: "#ff4757",
@@ -220,6 +221,19 @@ function StatCard({
 }
 
 function HeroSection() {
+  const particles = useMemo(
+    () =>
+      Array.from({ length: 30 }, (_, i) => ({
+        width: Math.random() * 4 + 2,
+        height: Math.random() * 4 + 2,
+        left: Math.random() * 100,
+        top: Math.random() * 100,
+        delay: Math.random() * 4,
+        duration: Math.random() * 3 + 2,
+        magenta: i % 3 === 0,
+      })),
+    [],
+  );
   return (
     <div className="relative overflow-hidden rounded-md mx-4 mt-4 mb-6 dark:border dark:border-primary/20" data-testid="hero-section">
       <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-chart-2/10 dark:from-[rgba(0,230,255,0.12)] dark:via-[rgba(2,8,25,0.95)] dark:to-[rgba(255,0,180,0.06)]" />
@@ -232,19 +246,19 @@ function HeroSection() {
         />
       </div>
       <div className="absolute inset-0">
-        {Array.from({ length: 30 }).map((_, i) => (
+        {particles.map((p, i) => (
           <div
             key={i}
             className="absolute rounded-full animate-pulse-glow"
             style={{
-              width: `${Math.random() * 4 + 2}px`,
-              height: `${Math.random() * 4 + 2}px`,
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              backgroundColor: i % 3 === 0 ? "rgba(255, 0, 180, 0.3)" : "rgba(0, 230, 255, 0.35)",
-              animationDelay: `${Math.random() * 4}s`,
-              animationDuration: `${Math.random() * 3 + 2}s`,
-              boxShadow: i % 3 === 0 ? "0 0 6px rgba(255, 0, 180, 0.4)" : "0 0 6px rgba(0, 230, 255, 0.4)",
+              width: `${p.width}px`,
+              height: `${p.height}px`,
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              backgroundColor: p.magenta ? "rgba(255, 0, 180, 0.3)" : "rgba(0, 230, 255, 0.35)",
+              animationDelay: `${p.delay}s`,
+              animationDuration: `${p.duration}s`,
+              boxShadow: p.magenta ? "0 0 6px rgba(255, 0, 180, 0.4)" : "0 0 6px rgba(0, 230, 255, 0.4)",
             }}
           />
         ))}
@@ -342,19 +356,19 @@ function RecentPentestsCard({ pentests }: { pentests: any[] }) {
       </CardHeader>
       <CardContent className="space-y-2">
         {pentests.length > 0 ? (
-          pentests.map((pt: any) => (
+          pentests.map((pt: any, index: number) => (
             <div
-              key={pt.id}
+              key={toText(pt?.id) || index}
               className="flex items-center justify-between gap-2 py-1.5 border-b last:border-0"
-              data-testid={`pentest-row-${pt.id}`}
+              data-testid={`pentest-row-${toText(pt?.id)}`}
             >
               <div className="flex items-center gap-2 min-w-0">
-                <SeverityBadge severity={pt.severity} />
-                <span className="text-xs font-semibold truncate">{pt.protocol}</span>
+                <SeverityBadge severity={toText(pt?.severity)} />
+                <span className="text-xs font-semibold truncate">{toText(pt?.protocol)}</span>
                 <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-muted-foreground truncate">{pt.target}</span>
+                <span className="text-xs text-muted-foreground truncate">{toText(pt?.target)}</span>
               </div>
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">{pt.time}</span>
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">{toText(pt?.time)}</span>
             </div>
           ))
         ) : (
@@ -382,17 +396,17 @@ function ThreatDetectionsCard({ threats }: { threats: any[] }) {
       </CardHeader>
       <CardContent className="space-y-2">
         {visibleDetections.length > 0 ? (
-          visibleDetections.map((td: any) => (
+          visibleDetections.map((td: any, index: number) => (
             <div
-              key={td.id}
+              key={toText(td?.id) || index}
               className="flex items-center justify-between gap-2 py-1.5 border-b last:border-0"
-              data-testid={`threat-row-${td.id}`}
+              data-testid={`threat-row-${toText(td?.id)}`}
             >
               <div className="flex items-center gap-2 min-w-0">
-                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" style={{ color: severityColor[td.severity] }} />
-                <span className="text-xs font-mono truncate">{td.id}</span>
+                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" style={{ color: severityColor[toText(td?.severity)] }} />
+                <span className="text-xs font-mono truncate">{toText(td?.id)}</span>
               </div>
-              <SeverityBadge severity={td.severity} />
+              <SeverityBadge severity={toText(td?.severity)} />
             </div>
           ))
         ) : (
@@ -451,7 +465,7 @@ function AttackPathsMiniCard({ pathNodes, pathEdges }: { pathNodes: any[]; pathE
               />
             );
           })}
-          {pathNodes.map((node: any) => {
+          {pathNodes.map((node: any, index: number) => {
             const cx = node.x * scale + offsetX;
             const cy = node.y * scale + offsetY;
             const colorMap: Record<string, string> = {
@@ -461,7 +475,7 @@ function AttackPathsMiniCard({ pathNodes, pathEdges }: { pathNodes: any[]; pathE
               cloud: "#2ed573",
             };
             return (
-              <g key={node.id}>
+              <g key={toText(node?.id) || index}>
                 <circle
                   cx={cx}
                   cy={cy}
@@ -482,7 +496,7 @@ function AttackPathsMiniCard({ pathNodes, pathEdges }: { pathNodes: any[]; pathE
                   className="fill-muted-foreground"
                   fontSize="7"
                 >
-                  {node.label}
+                  {toText(node?.label)}
                 </text>
               </g>
             );
@@ -547,11 +561,11 @@ function ThreatBreakdownChart({ breakdown }: { breakdown: any[] }) {
             </ResponsiveContainer>
           </div>
           <div className="flex flex-col gap-2">
-            {breakdown.map((item: any) => (
-              <div key={item.name} className="flex items-center gap-2 text-xs">
+            {breakdown.map((item: any, index: number) => (
+              <div key={toText(item?.name) || index} className="flex items-center gap-2 text-xs">
                 <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.fill }} />
-                <span className="text-muted-foreground">{item.name}</span>
-                <span className="font-semibold ml-auto">{item.value}%</span>
+                <span className="text-muted-foreground">{toText(item?.name)}</span>
+                <span className="font-semibold ml-auto">{toText(item?.value)}%</span>
               </div>
             ))}
           </div>
@@ -638,21 +652,21 @@ function RecentActivityCard({ activity }: { activity: any[] }) {
       </CardHeader>
       <CardContent className="space-y-3">
         {activity.length > 0 ? (
-          activity.map((item: any) => (
+          activity.map((item: any, index: number) => (
             <div
-              key={item.id}
+              key={toText(item?.id) || index}
               className="flex items-start gap-3"
-              data-testid={`activity-row-${item.id}`}
+              data-testid={`activity-row-${toText(item?.id)}`}
             >
               <div
                 className="mt-1 h-2 w-2 rounded-full flex-shrink-0"
-                style={{ backgroundColor: severityColor[item.severity] || "#70a1ff" }}
+                style={{ backgroundColor: severityColor[toText(item?.severity)] || "#70a1ff" }}
               />
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{item.event}</p>
-                <p className="text-[10px] text-muted-foreground">{item.time}</p>
+                <p className="text-xs font-medium truncate">{toText(item?.event)}</p>
+                <p className="text-[10px] text-muted-foreground">{toText(item?.time)}</p>
               </div>
-              <SeverityBadge severity={item.severity} />
+              <SeverityBadge severity={toText(item?.severity)} />
             </div>
           ))
         ) : (
@@ -787,13 +801,13 @@ export default function Dashboard() {
   });
 
   const stats = dashData?.stats || { totalScans: 0, threatsDetected: 0, activeMonitors: 0, detectionRate: 0 };
-  const pentests = dashData?.recent_pentests || [];
-  const threats = dashData?.threat_detections || [];
-  const activity = dashData?.recent_activity || [];
-  const breakdown = dashData?.threat_breakdown || [];
-  const keywords = dashData?.top_keywords || [];
-  const pathNodes = dashData?.attack_path_nodes || [];
-  const pathEdges = dashData?.attack_path_edges || [];
+  const pentests = toArray<any>(dashData?.recent_pentests);
+  const threats = toArray<any>(dashData?.threat_detections);
+  const activity = toArray<any>(dashData?.recent_activity);
+  const breakdown = toArray<any>(dashData?.threat_breakdown);
+  const keywords = toArray<any>(dashData?.top_keywords);
+  const pathNodes = toArray<any>(dashData?.attack_path_nodes);
+  const pathEdges = toArray<any>(dashData?.attack_path_edges);
 
   if (isLoading) {
     return (

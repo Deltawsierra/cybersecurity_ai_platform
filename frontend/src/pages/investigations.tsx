@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
+import { toText, toArray } from "@/lib/safe";
 
 const severityColor: Record<string, string> = {
   critical: "#ff4757",
@@ -25,13 +26,14 @@ const severityColor: Record<string, string> = {
 };
 
 function SeverityBadge({ severity }: { severity: string }) {
+  const sev = toText(severity).toLowerCase() || "info";
   return (
     <Badge
       className="text-[10px] px-1.5 py-0 font-semibold uppercase no-default-hover-elevate no-default-active-elevate"
-      style={{ backgroundColor: severityColor[severity] || "#70a1ff", color: "#fff" }}
-      data-testid={`badge-severity-${severity}`}
+      style={{ backgroundColor: severityColor[sev] || "#70a1ff", color: "#fff" }}
+      data-testid={`badge-severity-${sev}`}
     >
-      {severity}
+      {sev}
     </Badge>
   );
 }
@@ -149,24 +151,24 @@ function ThreatCasesPanel({ threatCases }: { threatCases: any[] }) {
           Advanced Agent Interplay : <span className="text-primary font-medium">7 Tasks Running</span>
         </p>
         <div className="space-y-3">
-          {threatCases.map((tc) => (
+          {threatCases.map((tc, ti) => (
             <div
-              key={tc.id}
+              key={toText(tc?.id) || ti}
               className="rounded-md p-3"
               style={{ background: "rgba(100, 130, 255, 0.05)", border: "1px solid rgba(100, 130, 255, 0.08)" }}
-              data-testid={`threat-case-${tc.id}`}
+              data-testid={`threat-case-${toText(tc?.id) || ti}`}
             >
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Zap className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                   <span className="text-xs font-semibold truncate">
-                    Threat Case #{tc.id} <span className="text-primary">{tc.name}</span>
+                    Threat Case #{toText(tc?.id)} <span className="text-primary">{toText(tc?.name)}</span>
                   </span>
                 </div>
-                <SeverityBadge severity={tc.severity} />
+                <SeverityBadge severity={toText(tc?.severity)} />
               </div>
-              <p className="text-[11px] text-foreground/80 ml-5">{tc.description}</p>
-              <p className="text-[10px] text-muted-foreground ml-5 mt-0.5">{tc.detail}</p>
+              <p className="text-[11px] text-foreground/80 ml-5">{toText(tc?.description)}</p>
+              <p className="text-[10px] text-muted-foreground ml-5 mt-0.5">{toText(tc?.detail)}</p>
             </div>
           ))}
         </div>
@@ -199,14 +201,14 @@ function InvestigationDetailPanel({ investigationDetails }: { investigationDetai
             className="text-[10px] px-1.5 py-0 no-default-hover-elevate no-default-active-elevate"
             data-testid="badge-progress"
           >
-            {investigationDetails.progress} / {investigationDetails.subCases.length}
+            {toText(investigationDetails.progress)} / {toArray(investigationDetails.subCases).length}
           </Badge>
         </div>
-        <p className="text-xs font-medium mb-0.5">{investigationDetails.title}</p>
-        <p className="text-[10px] text-muted-foreground mb-3">{investigationDetails.target}</p>
+        <p className="text-xs font-medium mb-0.5">{toText(investigationDetails.title)}</p>
+        <p className="text-[10px] text-muted-foreground mb-3">{toText(investigationDetails.target)}</p>
 
         <div className="space-y-3">
-          {investigationDetails.subCases.map((sc: any, i: number) => (
+          {toArray<any>(investigationDetails.subCases).map((sc: any, i: number) => (
             <div
               key={i}
               className="rounded-md p-3"
@@ -214,14 +216,14 @@ function InvestigationDetailPanel({ investigationDetails }: { investigationDetai
               data-testid={`subcase-${i}`}
             >
               <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-xs font-semibold">{sc.title}</span>
-                <SeverityBadge severity={sc.severity} />
+                <span className="text-xs font-semibold">{toText(sc?.title)}</span>
+                <SeverityBadge severity={toText(sc?.severity)} />
               </div>
-              <p className="text-[10px] text-muted-foreground">{sc.detail}</p>
-              {sc.findings && (
+              <p className="text-[10px] text-muted-foreground">{toText(sc?.detail)}</p>
+              {sc?.findings && (
                 <p className="text-[10px] text-muted-foreground mt-1">
                   <Activity className="h-3 w-3 inline mr-1" />
-                  {sc.findings}
+                  {toText(sc.findings)}
                 </p>
               )}
             </div>
@@ -257,18 +259,18 @@ function EvidenceAndOperations({ evidenceReview, securityOperations }: { evidenc
           >
             <div className="flex items-center justify-between gap-2 mb-1">
               <span className="text-xs font-semibold">
-                Exploit Chains : {evidenceReview.exploitChains.title}
+                Exploit Chains : {toText(evidenceReview.exploitChains.title)}
               </span>
-              <SeverityBadge severity={evidenceReview.exploitChains.severity} />
+              <SeverityBadge severity={toText(evidenceReview.exploitChains.severity)} />
             </div>
             <div className="flex flex-wrap gap-1.5 mt-1">
-              {(evidenceReview.exploitChains.cves || []).map((cve: string, i: number) => (
+              {toArray(evidenceReview.exploitChains.cves).map((cve, i: number) => (
                 <Badge
                   key={i}
                   variant="secondary"
                   className="text-[9px] px-1 py-0 no-default-hover-elevate no-default-active-elevate"
                 >
-                  {cve}
+                  {toText(cve)}
                 </Badge>
               ))}
             </div>
@@ -280,14 +282,14 @@ function EvidenceAndOperations({ evidenceReview, securityOperations }: { evidenc
             data-testid="evidence-credentials"
           >
             <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="text-xs font-semibold">{evidenceReview.credentials.id}</span>
-              <SeverityBadge severity={evidenceReview.credentials.severity} />
+              <span className="text-xs font-semibold">{toText(evidenceReview.credentials.id)}</span>
+              <SeverityBadge severity={toText(evidenceReview.credentials.severity)} />
             </div>
-            <p className="text-[11px] text-foreground/80">{evidenceReview.credentials.title}</p>
-            <p className="text-[10px] text-muted-foreground">{evidenceReview.credentials.detail}</p>
+            <p className="text-[11px] text-foreground/80">{toText(evidenceReview.credentials.title)}</p>
+            <p className="text-[10px] text-muted-foreground">{toText(evidenceReview.credentials.detail)}</p>
             <div className="flex items-center gap-1 mt-1">
               <Clock className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[9px] text-muted-foreground">{evidenceReview.credentials.time}</span>
+              <span className="text-[9px] text-muted-foreground">{toText(evidenceReview.credentials.time)}</span>
             </div>
           </div>
           )}
@@ -315,8 +317,8 @@ function EvidenceAndOperations({ evidenceReview, securityOperations }: { evidenc
                   style={{ backgroundColor: opDotColors[i % opDotColors.length] }}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] leading-tight">{op.event}</p>
-                  <p className="text-[9px] text-muted-foreground">{op.time}</p>
+                  <p className="text-[11px] leading-tight">{toText(op?.event)}</p>
+                  <p className="text-[9px] text-muted-foreground">{toText(op?.time)}</p>
                 </div>
               </div>
             ))}
@@ -367,12 +369,12 @@ function RecommendationsPanel({ recommendations }: { recommendations: any }) {
             <h3 className="text-sm font-semibold">Key Remediation Steps</h3>
           </div>
           <div className="space-y-2">
-            {recommendations.steps.map((step: string, i: number) => (
+            {toArray(recommendations.steps).map((step, i: number) => (
               <div key={i} className="flex items-start gap-2" data-testid={`remediation-step-${i}`}>
                 <div className="flex items-center justify-center h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex-shrink-0 mt-0.5">
                   {i + 1}
                 </div>
-                <p className="text-[11px] leading-relaxed">{step}</p>
+                <p className="text-[11px] leading-relaxed">{toText(step)}</p>
               </div>
             ))}
           </div>
@@ -386,7 +388,7 @@ function RecommendationsPanel({ recommendations }: { recommendations: any }) {
             <h3 className="text-sm font-semibold">Operator Notes</h3>
           </div>
           <div className="space-y-2">
-            {recommendations.operatorNotes.map((note: any, i: number) => (
+            {toArray<any>(recommendations.operatorNotes).map((note: any, i: number) => (
               <div
                 key={i}
                 className="rounded-md p-2.5"
@@ -394,17 +396,17 @@ function RecommendationsPanel({ recommendations }: { recommendations: any }) {
                 data-testid={`operator-note-${i}`}
               >
                 <div className="flex items-center justify-between gap-2 mb-0.5">
-                  <p className="text-[11px] leading-tight flex-1">{note.note}</p>
+                  <p className="text-[11px] leading-tight flex-1">{toText(note?.note)}</p>
                   <Badge
                     className="text-[9px] px-1.5 py-0 no-default-hover-elevate no-default-active-elevate whitespace-nowrap"
-                    style={{ backgroundColor: statusColors[note.status] || "#70a1ff", color: "#fff" }}
+                    style={{ backgroundColor: statusColors[toText(note?.status)] || "#70a1ff", color: "#fff" }}
                   >
-                    {note.status}
+                    {toText(note?.status)}
                   </Badge>
                 </div>
                 <div className="flex items-center gap-1 mt-1">
                   <Clock className="h-2.5 w-2.5 text-muted-foreground" />
-                  <span className="text-[9px] text-muted-foreground">{note.time}</span>
+                  <span className="text-[9px] text-muted-foreground">{toText(note?.time)}</span>
                 </div>
               </div>
             ))}
@@ -521,10 +523,10 @@ export default function Investigations() {
     retry: false,
   });
 
-  const triageHeatmapData = investigationData?.triage_heatmap || [];
-  const threatCases = investigationData?.threat_cases || [];
+  const triageHeatmapData = toArray<number[]>(investigationData?.triage_heatmap);
+  const threatCases = toArray<any>(investigationData?.threat_cases);
   const investigationDetails = investigationData?.details || { caseId: 0, title: "", target: "", progress: 0, subCases: [] };
-  const securityOperations = investigationData?.security_operations || [];
+  const securityOperations = toArray<any>(investigationData?.security_operations);
   const recommendations = investigationData?.recommendations || { steps: [], operatorNotes: [] };
   const evidenceReview = investigationData?.evidence_review || { exploitChains: {}, credentials: {} };
 

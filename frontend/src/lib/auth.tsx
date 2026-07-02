@@ -19,7 +19,9 @@ interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isDemo: boolean;
   login: (username: string, password: string) => Promise<void>;
+  loginDemo: () => void;
   logout: () => void;
   getAccessToken: () => string | null;
   refreshAccessToken: () => Promise<string | null>;
@@ -28,6 +30,14 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const REFRESH_TOKEN_KEY = "athena_refresh_token";
+const DEMO_MODE_KEY = "athena_demo_mode";
+
+const DEMO_USER: AuthUser = {
+  id: 0,
+  username: "demo",
+  email: "demo@mythos.ai",
+  role: "admin",
+};
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
   const parts = token.split(".");
@@ -116,6 +126,7 @@ async function fetchCurrentUser(accessToken: string): Promise<AuthUser> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
   const accessTokenRef = useRef<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -177,7 +188,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearRefreshTimer();
     accessTokenRef.current = null;
     setUser(null);
+    setIsDemo(false);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(DEMO_MODE_KEY);
+  }, [clearRefreshTimer]);
+
+  const loginDemo = useCallback(() => {
+    clearRefreshTimer();
+    accessTokenRef.current = null;
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.setItem(DEMO_MODE_KEY, "true");
+    setIsDemo(true);
+    setUser(DEMO_USER);
+    setIsLoading(false);
   }, [clearRefreshTimer]);
 
   const login = useCallback(
@@ -196,6 +219,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       accessTokenRef.current = data.access;
       localStorage.setItem(REFRESH_TOKEN_KEY, data.refresh);
+      localStorage.removeItem(DEMO_MODE_KEY);
+      setIsDemo(false);
 
       const currentUser = await fetchCurrentUser(data.access);
       setUser(currentUser);
@@ -244,6 +269,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function tryRestoreSession() {
+      if (localStorage.getItem(DEMO_MODE_KEY) === "true") {
+        setIsDemo(true);
+        setUser(DEMO_USER);
+        setIsLoading(false);
+        return;
+      }
+
       const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
       if (!refreshToken) {
         setIsLoading(false);
@@ -303,7 +335,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         isLoading,
+        isDemo,
         login,
+        loginDemo,
         logout,
         getAccessToken,
         refreshAccessToken,

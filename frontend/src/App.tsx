@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { NewsTicker } from "@/components/news-ticker";
 import { AnimatedBackground } from "@/components/animated-background";
+import { ErrorBoundary } from "@/components/error-boundary";
 import Dashboard from "@/pages/dashboard";
 import AttackPaths from "@/pages/attack-paths";
 import Investigations from "@/pages/investigations";
@@ -72,10 +73,16 @@ function AuthenticatedLayout() {
       <AnimatedBackground />
       <div className="fixed inset-0 z-0 pointer-events-none dark:bg-gradient-to-b dark:from-[rgba(0,230,255,0.02)] dark:via-transparent dark:to-[rgba(255,0,180,0.02)]" />
       <div className="relative z-10">
-        {showChrome && <DashboardHeader />}
-        {showChrome && <NewsTicker />}
+        {showChrome && (
+          <ErrorBoundary resetKey={location}>
+            <DashboardHeader />
+            <NewsTicker />
+          </ErrorBoundary>
+        )}
         <main className="flex-1">
-          <Router />
+          <ErrorBoundary resetKey={location}>
+            <Router />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
