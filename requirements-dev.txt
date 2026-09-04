@@ -1,0 +1,14 @@
+# The light set needed to run the test suite and the Django checks.
+#
+# requirements.txt pulls torch, transformers, spacy and datasets, none of which
+# any code in this repository imports, plus a spaCy model wheel served from a
+# GitHub URL that no air-gapped or proxied build can reach. Installing that to
+# run a unit test is not reasonable.
+Django==5.2.5
+djangorestframework==3.16.1
+djangorestframework_simplejwt==5.5.1
+django-cors-headers==4.7.0
+requests==2.32.5
+reportlab==4.4.3
+pytest>=8.0
+pytest-django>=4.8

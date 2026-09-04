@@ -36,9 +36,15 @@ class IsAdminOrAnalyst(IsAuthenticatedWithRole):
 
 class IsAnyRole(IsAuthenticatedWithRole):
     """
-    Any authenticated user with a valid role.
+    Any authenticated user holding a role this system recognises.
+
+    This used to add nothing to its base class, whose only extra test was that
+    the user has a `role` attribute at all, which is always true. A blank or
+    misspelled role passed it.
     """
 
     def has_permission(self, request, view):
-        return super().has_permission(request, view)
+        if not super().has_permission(request, view):
+            return False
+        return request.user.role in request.user.Roles.values
 

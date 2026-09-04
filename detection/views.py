@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.response import Response
@@ -152,7 +153,8 @@ class CVEPDFAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        cve = CVEClassifyResult.objects.get(pk=pk)
+        # An id that does not exist raised DoesNotExist and became a 500.
+        cve = get_object_or_404(CVEClassifyResult, pk=pk)
         filename, pdf_bytes = generate_cve_pdf(cve)
 
         response = HttpResponse(
@@ -168,12 +170,24 @@ class CVEEmailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        """
+        Email a CVE classification.
+
+        The success path of this method was empty, so it returned None and
+        Django raised on every well-formed request. It is not implemented, and
+        now says so instead of failing as a server error.
+        """
         recipient = request.data.get("recipient_email")
         if not recipient:
             return Response(
                 {"error": "recipient_email is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        return Response(
+            {"error": "Emailing a CVE classification is not implemented yet."},
+            status=status.HTTP_501_NOT_IMPLEMENTED,
+        )
 
         
 

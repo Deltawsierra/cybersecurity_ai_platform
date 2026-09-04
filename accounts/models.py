@@ -16,7 +16,12 @@ class CustomUser(AbstractUser):
 
     @property
     def is_admin(self):
-        return self.role == self.Roles.ADMIN
+        # A Django superuser had no rights in this API at all, because role
+        # defaults to viewer and nothing consulted is_superuser. That left two
+        # disjoint privilege systems: createsuperuser produced an account that
+        # could not read the user list, while a role=admin account with
+        # is_staff False controlled the user API but could not reach /admin/.
+        return self.role == self.Roles.ADMIN or self.is_superuser
 
     @property
     def is_analyst(self):

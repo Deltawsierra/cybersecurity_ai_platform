@@ -1,5 +1,14 @@
 import requests
+from django.conf import settings as django_settings
 from django.conf import settings
+
+
+# (connect, read). Overridable so a long scan can be given more room without
+# editing source.
+ENGINE_TIMEOUT = (
+    float(getattr(django_settings, "CYBERENGINE_CONNECT_TIMEOUT", 3.05)),
+    float(getattr(django_settings, "CYBERENGINE_READ_TIMEOUT", 60)),
+)
 
 
 class EngineError(Exception):
@@ -38,7 +47,10 @@ class CyberEngineClient:
                 f"{self.base_url}{path}",
                 json=payload,
                 headers=self.headers,
-                timeout=1000,  # prevent Django worker starvation
+                # A connect and read pair. This was a single value of 1000 seconds,
+                # commented as preventing worker starvation, which is what it
+                # caused: one hung engine call pinned a worker for 17 minutes.
+                timeout=ENGINE_TIMEOUT,
             )
         except requests.RequestException as e:
             raise EngineError(f"Engine unreachable: {e}")

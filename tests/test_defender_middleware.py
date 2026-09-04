@@ -4,7 +4,9 @@ every request and allows the request when it gets none. That default is
 correct, but it used to be silent, so a wrong header or a stopped engine
 switched the defensive layer off with nothing in the logs.
 
-These tests need no engine: the HTTP call is replaced.
+These tests need no engine. They use Django's RequestFactory rather than a
+hand-rolled fake, because the body handling is where the defects were and a
+stub carrying `body = b""` cannot reach it.
 """
 
 import logging
@@ -26,105 +28,352 @@ if not settings.configured:
         CYBERENGINE_URL="http://127.0.0.1:8001",
         CYBERENGINE_OPERATOR_KEY="test-operator-key",
         DEFENDER_MONITOR_ONLY=True,
+        DATA_UPLOAD_MAX_MEMORY_SIZE=2 * 1024 * 1024,
     )
     django.setup()
 
-from audit.middleware import DefenderMiddleware  # noqa: E402
+from django.test import RequestFactory  # noqa: E402
+
+from audit.middleware import DefenderMiddleware, client_ip  # noqa: E402
+
+ENGINE_URL = "http://127.0.0.1:8001/defend"
+_MISSING = object()
 
 
-class FakeRequest:
-    def __init__(self):
-        self.audit_metadata = {
-            "ip_address": "1.2.3.4",
-            "path": "/api/thing",
-            "method": "GET",
-            "user_agent": "pytest",
-        }
-        self.META = {"QUERY_STRING": ""}
-        self.body = b""
+@pytest.fixture()
+def factory():
+    return RequestFactory()
 
 
-def make_middleware(**overrides):
-    for key, value in overrides.items():
-        setattr(settings, key, value)
-    return DefenderMiddleware(lambda request: HttpResponse("ok"))
+@pytest.fixture()
+def settings_override():
+    """
+    Set settings for one test and put them back.
+
+    The previous version of this file mutated global settings and never
+    restored them, so a threshold set in one test leaked into the next and the
+    suite passed only in the order it happened to be written in.
+    """
+    saved = {}
+
+    def apply(**overrides):
+        for key, value in overrides.items():
+            if key not in saved:
+                saved[key] = getattr(settings, key, _MISSING)
+            setattr(settings, key, value)
+
+    yield apply
+
+    for key, value in saved.items():
+        if value is _MISSING:
+            delattr(settings, key)
+        else:
+            setattr(settings, key, value)
 
 
-def response(status=200, payload=None):
-    fake = mock.Mock()
-    fake.status_code = status
-    fake.json.return_value = payload if payload is not None else {"action": "allow"}
-    return fake
+@pytest.fixture()
+def middleware(settings_override):
+    def build(**overrides):
+        settings_override(**overrides)
+        return DefenderMiddleware(lambda request: HttpResponse("ok"))
+
+    return build
 
 
-def test_the_engine_is_asked_on_the_standard_header():
+def engine_says(payload=None, status=200, raises=None):
+    """A stand-in for requests.post."""
+    if raises is not None:
+        return mock.Mock(side_effect=raises)
+    response = mock.Mock()
+    response.status_code = status
+    if isinstance(payload, Exception):
+        response.json.side_effect = payload
+    else:
+        response.json.return_value = {"action": "allow"} if payload is None else payload
+    return mock.Mock(return_value=response)
+
+
+def logged(caplog):
+    return " | ".join(record.getMessage() for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# What is sent to the engine
+# ---------------------------------------------------------------------------
+
+
+def test_the_engine_is_asked_at_the_right_url_on_the_standard_header(factory, middleware):
     """
     The engine authenticates every privileged route on X-API-Key. This
     middleware sent X-Operator-Key, so once the engine moved to the standard
-    dependency every call here would have failed.
+    dependency every call here would have failed. The URL is asserted too: the
+    call went to /defend/ against a route defined without the trailing slash,
+    spending a redirect inside a 500ms budget.
     """
-    middleware = make_middleware()
-    with mock.patch("audit.middleware.requests.post", return_value=response()) as post:
-        middleware(FakeRequest())
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(factory.get("/api/thing"))
 
-    _args, kwargs = post.call_args
+    args, kwargs = post.call_args
+    assert args[0] == ENGINE_URL
     assert kwargs["headers"]["X-API-Key"] == "test-operator-key"
     assert "X-OPERATOR-KEY" not in kwargs["headers"]
+    assert kwargs["timeout"] == 0.5
 
 
-def test_a_refused_key_is_logged_rather_than_passing_in_silence(caplog):
-    middleware = make_middleware()
-    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
-        with mock.patch("audit.middleware.requests.post", return_value=response(status=403)):
-            result = middleware(FakeRequest())
+def test_credentials_are_never_forwarded_to_the_engine(factory, middleware):
+    """The body of every request was forwarded, including sign-in bodies."""
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(
+            factory.post(
+                "/api/token/",
+                data='{"username":"alice","password":"hunter2"}',
+                content_type="application/json",
+            )
+        )
 
-    assert result.status_code == 200, "the request is still allowed"
-    assert any("refused the operator key" in r.getMessage() for r in caplog.records)
-
-
-def test_an_unreachable_engine_is_logged(caplog):
-    middleware = make_middleware()
-    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
-        with mock.patch(
-            "audit.middleware.requests.post", side_effect=requests.ConnectionError("refused")
-        ):
-            result = middleware(FakeRequest())
-
-    assert result.status_code == 200
-    assert any("unreachable" in r.getMessage() for r in caplog.records)
+    forwarded = post.call_args.kwargs["json"]
+    assert forwarded["body"] == ""
+    assert "hunter2" not in str(forwarded)
 
 
-def test_a_run_of_failures_escalates_to_an_error(caplog):
-    middleware = make_middleware(DEFENDER_FAILURE_ALERT_AFTER=3)
-    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
-        with mock.patch(
-            "audit.middleware.requests.post", side_effect=requests.ConnectionError("refused")
-        ):
-            for _ in range(4):
-                middleware(FakeRequest())
+def test_a_sensitive_field_elsewhere_is_redacted(factory, middleware):
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(
+            factory.post(
+                "/api/pentest/scan/",
+                data='{"url":"https://x.test","api_key":"sk-live-123","note":"hi"}',
+                content_type="application/json",
+            )
+        )
 
-    assert any(r.levelno == logging.ERROR for r in caplog.records), (
-        "a defensive layer that has been off for several requests should escalate"
+    body = post.call_args.kwargs["json"]["body"]
+    assert "sk-live-123" not in body
+    assert "[redacted]" in body
+    assert "https://x.test" in body, "the rest of the body is still inspectable"
+
+
+def test_an_uploaded_file_is_not_copied_into_the_engine(factory, middleware):
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(factory.post("/api/detection/defender/file/", data={"f": "x" * 100}))
+
+    assert post.call_args.kwargs["json"]["body"] == ""
+
+
+def test_a_body_too_large_to_inspect_is_reported_not_silently_emptied(
+    factory, middleware, settings_override, caplog
+):
+    """
+    A payload padded past DATA_UPLOAD_MAX_MEMORY_SIZE made request.body raise.
+    A bare except swallowed it and the engine saw an empty body, so the same
+    injection that was blocked at 43 bytes went through at 3 MB, in silence.
+    """
+    # The bound is set here rather than inherited, so the test states the
+    # condition it is about.
+    settings_override(DATA_UPLOAD_MAX_MEMORY_SIZE=2048)
+    oversized = factory.post(
+        "/api/thing",
+        data='{"q":"' + "A" * 8192 + '"}',
+        content_type="application/json",
     )
 
+    post = engine_says()
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch("audit.middleware.requests.post", post):
+            middleware()(oversized)
 
-def test_a_block_decision_is_enforced_when_not_monitoring_only():
-    middleware = make_middleware(DEFENDER_MONITOR_ONLY=False)
+    assert post.call_args.kwargs["json"]["body"] == ""
+    assert "could not be inspected" in logged(caplog)
+
+
+def test_static_paths_are_not_sent_to_the_engine(factory, middleware):
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(factory.get("/static/app.css"))
+
+    post.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# How a decision is enforced
+# ---------------------------------------------------------------------------
+
+
+def test_a_block_decision_is_enforced_when_not_monitoring_only(factory, middleware):
     with mock.patch(
         "audit.middleware.requests.post",
-        return_value=response(payload={"action": "block", "reason": "sqli"}),
+        engine_says({"action": "block", "allow": False, "reason": "sqli"}),
     ):
-        result = middleware(FakeRequest())
+        result = middleware(DEFENDER_MONITOR_ONLY=False)(factory.get("/api/thing"))
 
     assert result.status_code == 403
 
 
-def test_a_block_decision_is_only_observed_in_monitor_mode():
-    middleware = make_middleware(DEFENDER_MONITOR_ONLY=True)
+@pytest.mark.parametrize("action", ["deny", "BLOCK", "reject", "drop", ""])
+def test_a_refusal_is_honoured_whatever_the_engine_calls_it(factory, middleware, action):
+    """
+    Only the exact string "block" was enforced, so "deny", "BLOCK" or any new
+    spelling on the engine side silently disabled enforcement. The engine also
+    sends an explicit allow boolean, and it was being thrown away.
+    """
     with mock.patch(
         "audit.middleware.requests.post",
-        return_value=response(payload={"action": "block", "reason": "sqli"}),
+        engine_says({"action": action, "allow": False, "reason": "x"}),
     ):
-        result = middleware(FakeRequest())
+        result = middleware(DEFENDER_MONITOR_ONLY=False)(factory.get("/api/thing"))
+
+    assert result.status_code == 403, f"action {action!r} was let through"
+
+
+def test_a_block_is_recorded_rather_than_discarded_in_monitor_mode(
+    factory, middleware, caplog
+):
+    """
+    Monitor mode is the shipped default. It made a round trip on every request,
+    received block decisions, and discarded them: a monitor that monitored
+    nothing.
+    """
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch(
+            "audit.middleware.requests.post",
+            engine_says({"action": "block", "allow": False, "reason": "sqli"}),
+        ):
+            result = middleware(DEFENDER_MONITOR_ONLY=True)(factory.get("/api/thing"))
 
     assert result.status_code == 200
+    assert "would have blocked" in logged(caplog)
+
+
+def test_a_throttle_answers_429_rather_than_sleeping(factory, middleware):
+    """Sleeping spent one of our own workers on the caller's behalf."""
+    with mock.patch(
+        "audit.middleware.requests.post",
+        engine_says({"action": "throttle", "allow": True, "block_seconds": 30}),
+    ):
+        result = middleware(DEFENDER_MONITOR_ONLY=False)(factory.get("/api/thing"))
+
+    assert result.status_code == 429
+    assert result["Retry-After"] == "30"
+
+
+def test_a_decision_that_is_not_an_object_does_not_500_every_request(
+    factory, middleware, caplog
+):
+    """Valid JSON of the wrong shape reached .get() and raised AttributeError."""
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch("audit.middleware.requests.post", engine_says(["allow"])):
+            result = middleware(DEFENDER_MONITOR_ONLY=False)(factory.get("/api/thing"))
+
+    assert result.status_code == 200
+    assert "not an object" in logged(caplog)
+
+
+def test_a_body_that_is_not_json_is_reported(factory, middleware, caplog):
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch(
+            "audit.middleware.requests.post", engine_says(ValueError("no json"))
+        ):
+            result = middleware()(factory.get("/api/thing"))
+
+    assert result.status_code == 200
+    assert "not JSON" in logged(caplog)
+
+
+# ---------------------------------------------------------------------------
+# Failure visibility
+# ---------------------------------------------------------------------------
+
+
+def test_a_refused_key_is_logged_rather_than_passing_in_silence(
+    factory, middleware, caplog
+):
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch("audit.middleware.requests.post", engine_says(status=403)):
+            result = middleware()(factory.get("/api/thing"))
+
+    assert result.status_code == 200, "the request is still allowed"
+    assert "refused the operator key" in logged(caplog)
+
+
+def test_an_unreachable_engine_is_logged(factory, middleware, caplog):
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch(
+            "audit.middleware.requests.post",
+            engine_says(raises=requests.ConnectionError("refused")),
+        ):
+            result = middleware()(factory.get("/api/thing"))
+
+    assert result.status_code == 200
+    assert "unreachable" in logged(caplog)
+
+
+def test_a_half_dead_engine_still_escalates(factory, middleware, caplog):
+    """
+    The counter was consecutive and reset on every success, so an engine
+    failing half the time never produced a single error line even though half
+    the traffic was going uninspected.
+    """
+    failing = engine_says(raises=requests.ConnectionError("refused"))
+    working = engine_says()
+    app = middleware(DEFENDER_FAILURE_ALERT_AFTER=3)
+
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        for _ in range(8):
+            with mock.patch("audit.middleware.requests.post", failing):
+                app(factory.get("/api/thing"))
+            with mock.patch("audit.middleware.requests.post", working):
+                app(factory.get("/api/thing"))
+
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+
+
+def test_neither_the_operator_key_nor_a_password_reaches_a_log(
+    factory, middleware, caplog
+):
+    with caplog.at_level(logging.DEBUG, logger="audit.middleware"):
+        with mock.patch(
+            "audit.middleware.requests.post",
+            engine_says(raises=requests.ConnectionError("http://127.0.0.1:8001 failed")),
+        ):
+            middleware()(
+                factory.post(
+                    "/api/thing",
+                    data='{"password":"hunter2"}',
+                    content_type="application/json",
+                )
+            )
+
+    assert "test-operator-key" not in logged(caplog)
+    assert "hunter2" not in logged(caplog)
+
+
+# ---------------------------------------------------------------------------
+# Whose address is it
+# ---------------------------------------------------------------------------
+
+
+def test_a_forwarded_for_header_is_ignored_without_a_trusted_proxy(factory):
+    """
+    This address is the only key the engine's rate limiter and block table use.
+    Trusting the header let a caller rotate it to evade rate limiting, or forge
+    one request to get someone else's address blocked.
+    """
+    request = factory.get("/api/thing", HTTP_X_FORWARDED_FOR="1.2.3.4")
+    request.META["REMOTE_ADDR"] = "10.0.0.9"
+
+    assert client_ip(request) == "10.0.0.9"
+
+
+def test_a_forwarded_for_header_is_used_behind_a_declared_proxy(
+    factory, settings_override
+):
+    settings_override(DEFENDER_TRUSTED_PROXY_COUNT=1)
+    request = factory.get("/api/thing", HTTP_X_FORWARDED_FOR="9.9.9.9, 203.0.113.7")
+    request.META["REMOTE_ADDR"] = "10.0.0.9"
+
+    # One proxy in front of us appended the address it saw, which is the
+    # rightmost entry a client could not have written.
+    assert client_ip(request) == "203.0.113.7"
