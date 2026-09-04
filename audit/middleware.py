@@ -101,7 +101,10 @@ class DefenderMiddleware:
         # every success never escalates on a half-dead engine, which is the
         # common case: half the traffic can go uninspected without a word.
         self._recent_failures = []
-        self._last_alert = 0.0
+        # None, not 0.0. time.monotonic() counts from an arbitrary point,
+        # which on a freshly booted machine is near zero, so a 0.0 sentinel
+        # read as "alerted a moment ago" and suppressed the first alert.
+        self._last_alert = None
         self._last_outcome_failed = False
 
         if not self.operator_key:
@@ -282,7 +285,7 @@ class DefenderMiddleware:
 
         # Escalate, but not once per request: a real outage would otherwise
         # fill the log at request rate.
-        if now - self._last_alert >= self.failure_window:
+        if self._last_alert is None or now - self._last_alert >= self.failure_window:
             self._last_alert = now
             logger.error(
                 "Defender engine unavailable for %s of the last %ss: %s. "

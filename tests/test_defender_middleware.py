@@ -330,6 +330,30 @@ def test_a_half_dead_engine_still_escalates(factory, middleware, caplog):
     assert any(record.levelno == logging.ERROR for record in caplog.records)
 
 
+def test_the_first_alert_is_not_suppressed_on_a_freshly_booted_machine(
+    factory, middleware, caplog
+):
+    """
+    time.monotonic() counts from an arbitrary point, and on a machine that has
+    just booted, such as a CI runner, that point is near zero. The "have I
+    alerted recently" sentinel started at 0.0, so the first alert read as
+    having just happened and was suppressed. Every failure after the threshold
+    then logged nothing at all.
+    """
+    failing = engine_says(raises=requests.ConnectionError("refused"))
+    app = middleware(DEFENDER_FAILURE_ALERT_AFTER=3)
+
+    with caplog.at_level(logging.WARNING, logger="audit.middleware"):
+        with mock.patch(
+            "audit.middleware.time.monotonic", side_effect=[0.1 * i for i in range(1, 40)]
+        ):
+            with mock.patch("audit.middleware.requests.post", failing):
+                for _ in range(6):
+                    app(factory.get("/api/thing"))
+
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+
+
 def test_neither_the_operator_key_nor_a_password_reaches_a_log(
     factory, middleware, caplog
 ):
