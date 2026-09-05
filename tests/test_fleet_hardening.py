@@ -366,7 +366,7 @@ def test_an_engagement_revoked_mid_scan_produces_no_report(factory, analyst, eng
     """
     engine = mock.Mock()
 
-    def run_scan(_url):
+    def run_scan(_url, **_kwargs):
         Engagement.objects.filter(pk=engagement.pk).update(status="cancelled")
         return {"results": [{"type": "info"}]}
 

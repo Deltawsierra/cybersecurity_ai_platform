@@ -129,7 +129,7 @@ def test_an_engine_refusal_and_a_revocation_at_the_same_time(factory, analyst, e
     policy, and the engagement is cancelled while it does. The scan must end
     once, in one state, with no report.
     """
-    def refuse_and_revoke(_url):
+    def refuse_and_revoke(_url, **_kwargs):
         Engagement.objects.filter(pk=engagement.pk).update(status="cancelled")
         return {"results": [{"type": "error", "message": "Refused by egress policy"}]}
 
@@ -164,7 +164,7 @@ def test_a_mixed_burst_answers_each_arm_the_way_it_would_alone(factory, analyst,
     """
     behaviour = threading.local()
 
-    def run_scan(_url):
+    def run_scan(_url, **_kwargs):
         mode = getattr(behaviour, "mode", "ok")
         if mode == "timeout":
             raise EngineError("Read timed out")
@@ -236,24 +236,49 @@ def test_a_mixed_burst_answers_each_arm_the_way_it_would_alone(factory, analyst,
 def test_twenty_concurrent_scans_under_one_engagement_do_not_interfere(
     factory, analyst, engagement
 ):
+    """
+    The patches are installed once, around all twenty threads. `mock.patch`
+    replaces a module global, so patching inside each thread means one
+    thread's teardown reverts the engine while another is mid-call — and that
+    thread gets a bare MagicMock back instead of a result. It fails roughly
+    one run in three, and it is the test racing itself, not the code.
+    """
     results = []
     errors = []
 
+    engine = mock.Mock()
+    engine.run_scan.return_value = {"results": [{"type": "info"}]}
+
     def run():
         try:
-            response = launch(
-                factory, analyst,
+            request = factory.post(
+                "/api/pentest/scan/",
                 {"url": IN_SCOPE, "consent": True, "engagement_id": engagement.pk},
+                format="json",
             )
-            results.append(response.status_code)
+            force_authenticate(request, user=analyst)
+            results.append(views.run_pentest_scan(request).status_code)
         except Exception as exc:  # noqa: BLE001
             errors.append(repr(exc))
 
-    threads = [threading.Thread(target=run) for _ in range(20)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    patches = mock.patch.multiple(
+        "pentest.views",
+        target_is_out_of_bounds=mock.DEFAULT,
+        CyberEngineClient=mock.DEFAULT,
+        render_scan_pdf_bytes=mock.DEFAULT,
+        save_pdf_to_scan=mock.DEFAULT,
+        send_pentest_scan_email=mock.DEFAULT,
+    )
+    with patches as mocks:
+        mocks["target_is_out_of_bounds"].return_value = None
+        mocks["render_scan_pdf_bytes"].return_value = b"%PDF-"
+        mocks["CyberEngineClient"].from_settings.return_value = engine
+
+        threads = [threading.Thread(target=run) for _ in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     assert errors == []
     assert results == [200] * 20

@@ -1,3 +1,5 @@
+import time
+
 import requests
 from django.conf import settings as django_settings
 from django.conf import settings
@@ -11,8 +13,34 @@ ENGINE_TIMEOUT = (
 )
 
 
+# How long to keep collecting a scan the engine is running for us, and how
+# often to ask. Polling does not hold a connection, so this can be far longer
+# than any read timeout: a scan that takes four minutes is now four minutes of
+# waiting rather than a scan the engine ran and we recorded nothing about.
+SCAN_COLLECT_SECONDS = float(getattr(django_settings, "CYBERENGINE_SCAN_TIMEOUT", 600))
+SCAN_POLL_SECONDS = float(getattr(django_settings, "CYBERENGINE_POLL_INTERVAL", 2.0))
+
+# Handed to the engine so a short scan answers on the first request and needs
+# no polling at all. Comfortably inside the read timeout.
+SCAN_INLINE_WAIT_SECONDS = 20.0
+
+
 class EngineError(Exception):
     pass
+
+
+class ScanStillRunning(EngineError):
+    """
+    We stopped collecting before the engine finished.
+
+    Carries the run id, because the scan is still going and its result can be
+    collected later. Losing that id is how a scan becomes work the engine did
+    for a customer that nobody has a record of.
+    """
+
+    def __init__(self, message: str, run_id: str):
+        super().__init__(message)
+        self.run_id = run_id
 
 
 class CyberEngineClient:
@@ -41,6 +69,19 @@ class CyberEngineClient:
             api_key=settings.CYBERENGINE_OPERATOR_KEY,
         )
 
+    def _get(self, path: str) -> dict:
+        try:
+            resp = requests.get(
+                f"{self.base_url}{path}", headers=self.headers, timeout=ENGINE_TIMEOUT
+            )
+        except requests.RequestException as e:
+            raise EngineError(f"Engine unreachable: {e}")
+
+        if not (200 <= resp.status_code < 300):
+            raise EngineError(f"Engine error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+
     def _post(self, path: str, payload: dict) -> dict:
         try:
             resp = requests.post(
@@ -66,8 +107,60 @@ class CyberEngineClient:
     # ENGINE ENDPOINTS
     # --------------------------------------------------
 
-    def run_scan(self, target: str) -> dict:
-        return self._post("/api/scan", {"target": target})
+    def run_scan(self, target: str, engagement_ref: str = None) -> dict:
+        """
+        Run a scan and return its findings.
+
+        The engine runs a scan as a job now. It used to run inside this
+        request, and a measured scan of a target answering in 0.4 seconds took
+        eighty-one against a sixty second read timeout — so the ordinary case
+        was that the engine tested a customer's live system and we recorded
+        "engine unreachable". We submit, and then collect.
+        """
+        payload = {"target": target, "wait_seconds": SCAN_INLINE_WAIT_SECONDS}
+        if engagement_ref:
+            payload["engagement_ref"] = engagement_ref
+
+        accepted = self._post("/api/scan", payload)
+
+        # A short scan comes back finished on the first request.
+        if accepted.get("done") and accepted.get("result") is not None:
+            return accepted["result"]
+        if "run_id" not in accepted:
+            # An older engine that still answers synchronously.
+            return accepted
+
+        return self.collect_scan(accepted["run_id"])
+
+    def collect_scan(self, run_id: str) -> dict:
+        """
+        Wait for a scan the engine is running, and return its findings.
+
+        Raises ScanStillRunning, carrying the id, if we give up first: the
+        scan is still going, and the caller needs the id to record that and
+        collect it later.
+        """
+        deadline = time.monotonic() + SCAN_COLLECT_SECONDS
+
+        while True:
+            status = self._get(f"/api/scans/{run_id}")
+
+            if status.get("done"):
+                if status.get("state") == "completed":
+                    return status.get("result") or {}
+                raise EngineError(
+                    f"Scan {status.get('state')}: "
+                    f"{status.get('reason') or (status.get('result') or {}).get('error') or 'no reason given'}"
+                )
+
+            if time.monotonic() >= deadline:
+                raise ScanStillRunning(
+                    f"The engine is still running this scan after "
+                    f"{SCAN_COLLECT_SECONDS:.0f}s; it can be collected later.",
+                    run_id=run_id,
+                )
+
+            time.sleep(SCAN_POLL_SECONDS)
 
     def run_llm_scan(self, payload: dict) -> dict:
         """
