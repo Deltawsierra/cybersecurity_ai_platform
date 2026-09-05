@@ -183,6 +183,12 @@ REST_FRAMEWORK = {
         "anon": os.environ.get("DJANGO_THROTTLE_ANON", "30/min"),
         "user": os.environ.get("DJANGO_THROTTLE_USER", "300/min"),
     },
+    # Without this, DRF's throttles key anonymous callers on the whole raw
+    # X-Forwarded-For header, so rotating one header defeated the rate limit
+    # on the token endpoint entirely. This is the same trust depth the audit
+    # middleware uses; zero means the header is not trusted at all and
+    # REMOTE_ADDR is the key.
+    "NUM_PROXIES": int(os.environ.get("DEFENDER_TRUSTED_PROXY_COUNT", 0)),
 }
 
 SIMPLE_JWT = {
@@ -259,7 +265,10 @@ CYBERENGINE_OPERATOR_KEY = os.environ.get("CYBERENGINE_OPERATOR_KEY")
 # AI DEFENDER (SAFE MODE) NOT AI LOGIC JUST A SAFETY SWITCH
 # -------------------------------------------------------------------
 
-DEFENDER_MONITOR_ONLY = True
+# Monitor mode logs what would have been blocked and blocks nothing. It was
+# hardcoded True with no override, so the whole enforcement path shipped dead:
+# there was no way to turn the defender on without editing this file.
+DEFENDER_MONITOR_ONLY = _env_flag("DEFENDER_MONITOR_ONLY", default=True)
 
 
 # -------------------------------------------------------------------

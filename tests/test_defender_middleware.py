@@ -12,6 +12,8 @@ stub carrying `body = b""` cannot reach it.
 import logging
 from unittest import mock
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+
 import django
 import pytest
 import requests
@@ -156,11 +158,47 @@ def test_a_sensitive_field_elsewhere_is_redacted(factory, middleware):
 
 
 def test_an_uploaded_file_is_not_copied_into_the_engine(factory, middleware):
+    """
+    The file itself is never forwarded, but the ordinary fields beside it are.
+
+    Skipping multipart wholesale was a complete bypass of inspection: the same
+    payload that was read as JSON went unread as a form.
+    """
+    upload = SimpleUploadedFile("evidence.bin", b"x" * 100, content_type="application/octet-stream")
     post = engine_says()
     with mock.patch("audit.middleware.requests.post", post):
-        middleware()(factory.post("/api/detection/defender/file/", data={"f": "x" * 100}))
+        middleware()(
+            factory.post(
+                "/api/pentest/scan/",
+                data={"note": "1 OR 1=1", "password": "hunter2", "f": upload},
+            )
+        )
 
-    assert post.call_args.kwargs["json"]["body"] == ""
+    body = post.call_args.kwargs["json"]["body"]
+    assert "xxxxxxxx" not in body, "the uploaded file was copied into the engine"
+    assert "1+OR+1%3D1" in body or "1 OR 1=1" in body, "the form fields were not inspected"
+    assert "hunter2" not in body
+    assert "[redacted]" in body
+
+
+def test_the_log_analysis_endpoint_is_not_scored_as_the_callers_own_behaviour(
+    factory, middleware
+):
+    """
+    Its body is attack text an analyst deliberately submitted for inspection.
+    Feeding it to the gateway meant pasting one hostile log line got the
+    analyst's own address blocked from every endpoint for five minutes.
+    """
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(
+            factory.post(
+                "/api/detection/defender/text/",
+                data={"text": "GET /shell?x=1; cat /etc/passwd"},
+            )
+        )
+
+    assert post.call_args is None, "the analysis endpoint was sent to the gateway"
 
 
 def test_a_body_too_large_to_inspect_is_reported_not_silently_emptied(
@@ -401,3 +439,163 @@ def test_a_forwarded_for_header_is_used_behind_a_declared_proxy(
     # One proxy in front of us appended the address it saw, which is the
     # rightmost entry a client could not have written.
     assert client_ip(request) == "203.0.113.7"
+
+
+# ---------------------------------------------------------------------------
+# Redaction, from an adversarial run that leaked the secret in 14 of 30 bodies
+# ---------------------------------------------------------------------------
+
+SECRET = "SUPERSECRETVALUE12345"
+
+
+@pytest.mark.parametrize(
+    ("content_type", "body"),
+    [
+        ("application/json", '{"password": "%s"}' % SECRET),
+        ("application/json", '{"pwd": "a\\"%s"}' % SECRET),
+        ("application/json", '{"password": {"v": "%s"}}' % SECRET),
+        ("application/json", '{"token": ["%s"]}' % SECRET),
+        ("application/json", '{"outer": {"api_key": "%s"}}' % SECRET),
+        ("application/json", '{"private_key": "%s"}' % SECRET),
+        ("application/json", '{"otp": "%s"}' % SECRET),
+        ("application/x-www-form-urlencoded", "username=bob&password=%s" % SECRET),
+        ("application/x-www-form-urlencoded", "X-Api-Key=%s" % SECRET),
+        ("text/plain", "Authorization: Bearer %s" % SECRET),
+    ],
+)
+def test_a_credential_never_reaches_the_engine(factory, middleware, content_type, body):
+    """
+    The redactor was one regex over a JSON string value, so a form body, a
+    bearer token in text, a non-string JSON value and an escaped quote in the
+    value all forwarded the secret to another service's logs.
+    """
+    post = engine_says()
+    request = factory.post("/api/pentest/scan/", data=body, content_type=content_type)
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(request)
+
+    forwarded = post.call_args.kwargs["json"]["body"]
+    assert SECRET not in forwarded
+    assert "[redacted]" in forwarded
+
+
+def test_a_credential_in_the_query_string_is_redacted_too(factory, middleware):
+    """QUERY_STRING was copied through with no redaction path at all."""
+    post = engine_says()
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(factory.get("/api/pentest/scans/?token=%s&page=2" % SECRET))
+
+    query = post.call_args.kwargs["json"]["query"]
+    assert SECRET not in query
+    assert "page=2" in query, "the rest of the query is still inspectable"
+
+
+def test_an_attack_payload_in_an_ordinary_field_reaches_the_engine_intact(factory, middleware):
+    """Redaction must not mangle what the engine is being asked to look at."""
+    post = engine_says()
+    request = factory.post(
+        "/api/pentest/scan/",
+        data="q=%27+OR+1%3D1--&password=" + SECRET,
+        content_type="application/x-www-form-urlencoded",
+    )
+    with mock.patch("audit.middleware.requests.post", post):
+        middleware()(request)
+
+    forwarded = post.call_args.kwargs["json"]["body"]
+    assert "%27+OR+1%3D1--" in forwarded
+    assert SECRET not in forwarded
+
+
+def test_a_secret_at_the_truncation_boundary_is_redacted_and_the_cut_is_reported(
+    factory, middleware, settings_override, caplog
+):
+    """
+    Truncation ran before redaction, so a secret straddling the limit lost its
+    closing quote, missed the pattern, and was forwarded in clear. The cut
+    itself was silent, which is the walk-past-inspection bug at a lower
+    threshold.
+    """
+    limit = 2048
+    padding = "A" * (limit + 100)
+    body = '{"note":"%s","password":"%s"}' % (padding, SECRET)
+    assert len(body) > limit
+
+    post = engine_says()
+    request = factory.post("/api/pentest/scan/", data=body, content_type="application/json")
+    with caplog.at_level(logging.WARNING), mock.patch("audit.middleware.requests.post", post):
+        middleware(DEFENDER_MAX_BODY_BYTES=limit)(request)
+
+    forwarded = post.call_args.kwargs["json"]["body"]
+    assert SECRET not in forwarded
+    assert len(forwarded) <= limit
+    assert any("truncated" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize("action", ["deny", "DENIED", "reject", "Refused", "BLOCK"])
+def test_every_spelling_of_no_is_a_refusal(factory, middleware, action):
+    """
+    The comment claimed "deny" was covered. It was not: only the literal
+    "block" was, so a decision of {"action": "deny"} was permission.
+    """
+    post = engine_says({"allow": True, "action": action, "reason": "x"})
+    with mock.patch("audit.middleware.requests.post", post):
+        response = middleware(DEFENDER_MONITOR_ONLY=False)(factory.get("/api/pentest/scans/"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "forwarded",
+    ["not-an-address", "1.2.3.4:8080", "999.999.999.999", "for=1.2.3.4", "a" * 300, ""],
+)
+def test_a_forwarded_value_that_is_not_an_address_falls_back_to_the_socket(
+    factory, settings_override, forwarded
+):
+    """
+    Whatever the header held became the key in the engine's rate limiter and
+    block table, so `1.2.3.4:8080` and `1.2.3.4` were different callers.
+    """
+    settings_override(DEFENDER_TRUSTED_PROXY_COUNT=1)
+    request = factory.get("/api/pentest/scans/", HTTP_X_FORWARDED_FOR=forwarded)
+    request.META["REMOTE_ADDR"] = "10.0.0.9"
+
+    assert client_ip(request) == "10.0.0.9"
+
+
+def test_a_trusted_forwarded_address_is_still_used(factory, settings_override):
+    settings_override(DEFENDER_TRUSTED_PROXY_COUNT=1)
+    request = factory.get("/api/pentest/scans/", HTTP_X_FORWARDED_FOR="203.0.113.5, 10.0.0.1")
+    request.META["REMOTE_ADDR"] = "10.0.0.9"
+
+    assert client_ip(request) == "10.0.0.1"
+
+
+def test_a_proxy_count_that_is_not_a_number_does_not_break_every_request(
+    factory, settings_override
+):
+    settings_override(DEFENDER_TRUSTED_PROXY_COUNT="abc")
+    request = factory.get("/api/pentest/scans/", HTTP_X_FORWARDED_FOR="203.0.113.5")
+    request.META["REMOTE_ADDR"] = "10.0.0.9"
+
+    assert client_ip(request) == "10.0.0.9"
+
+
+def test_the_failure_window_does_not_lose_failures_under_concurrency(middleware):
+    """
+    One instance serves every worker thread, and the window was a
+    read-modify-write across two statements: 32 threads lost 40% of the
+    failures, so the alert fired late exactly when load was high.
+    """
+    import threading
+
+    instance = middleware(DEFENDER_FAILURE_WINDOW_SECONDS=300, DEFENDER_FAILURE_ALERT_AFTER=10**9)
+    threads = [
+        threading.Thread(target=lambda: [instance._record_failure("x") for _ in range(200)])
+        for _ in range(16)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(instance._recent_failures) == 16 * 200

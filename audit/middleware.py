@@ -1,7 +1,11 @@
+import ipaddress
+import json
 import logging
 import re
+import threading
 import time
 import uuid
+from urllib.parse import unquote_plus, urlencode
 
 import requests
 from django.conf import settings
@@ -45,7 +49,12 @@ def client_ip(request):
     not trusted at all.
     """
     remote = request.META.get("REMOTE_ADDR")
-    depth = int(getattr(settings, "DEFENDER_TRUSTED_PROXY_COUNT", 0) or 0)
+    try:
+        depth = int(getattr(settings, "DEFENDER_TRUSTED_PROXY_COUNT", 0) or 0)
+    except (TypeError, ValueError):
+        # A misconfigured setting used to raise here, on every request.
+        logger.error("DEFENDER_TRUSTED_PROXY_COUNT is not a number; not trusting the header")
+        depth = 0
     if depth <= 0:
         return remote
 
@@ -57,7 +66,16 @@ def client_ip(request):
     # Count from the right: the rightmost entries were added by our own
     # proxies and are the only ones a client cannot control.
     index = len(hops) - depth
-    return hops[index] if 0 <= index < len(hops) else remote
+    candidate = hops[index] if 0 <= index < len(hops) else remote
+
+    # Even a trusted position can hold anything the hop in front of it copied
+    # in. A value that is not an address was passed on to the engine's block
+    # table verbatim, so `1.2.3.4:8080` and `1.2.3.4` were different callers.
+    try:
+        ipaddress.ip_address(candidate)
+    except (ValueError, TypeError):
+        return remote
+    return candidate
 
 
 # Request bodies are forwarded to the engine for inspection. These never are:
@@ -71,13 +89,111 @@ SENSITIVE_PATHS = ("/api/token", "/admin/login", "/api/accounts/users")
 INSPECTABLE_TYPES = ("application/json", "application/x-www-form-urlencoded", "text/plain")
 
 # Paths that never carry an attack worth a synchronous round trip.
-SKIP_PREFIXES = ("/static/", "/media/", "/admin/jsi18n/", "/api/health")
+#
+# "/api/detection/defender/" is here for a different reason: it is the log
+# analysis endpoint, so its body is attack text the analyst deliberately
+# submitted for inspection. Scoring it as the caller's own behaviour meant
+# pasting one hostile log line got the analyst's address blocked from the whole
+# platform. Content a user submits for analysis is not conduct.
+SKIP_PREFIXES = (
+    "/static/",
+    "/media/",
+    "/admin/jsi18n/",
+    "/api/health/",
+    "/api/detection/defender/",
+)
 
-# Values under keys like these are replaced before the body is forwarded.
-_SENSITIVE_VALUE = re.compile(
-    r'("(?:[^"]*(?:pass|pwd|secret|token|authorization|api[_-]?key|credential|session)[^"]*)"\s*:\s*)"[^"]*"',
+# Key fragments whose values are replaced before the body is forwarded.
+_SENSITIVE_KEY_PARTS = (
+    "pass", "pwd", "secret", "token", "authorization", "auth", "api_key", "apikey",
+    "api-key", "credential", "session", "cookie", "private_key", "privatekey",
+    "otp", "mfa", "totp", "ssn", "signature", "client_secret",
+)
+
+REDACTED = "[redacted]"
+
+# Every spelling of "no". Reading only "block" meant "deny" was permission,
+# which is the failure the explicit `allow` boolean was added to prevent and
+# which the comment in __call__ already claimed to have fixed.
+_BLOCKING_ACTIONS = frozenset({"block", "blocked", "deny", "denied", "refuse", "refused", "reject", "rejected"})
+
+
+def _is_sensitive_key(key):
+    lowered = str(key).lower()
+    return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
+
+
+def _redact_structure(value):
+    """Replace every value under a sensitive key, at any depth and of any type."""
+    if isinstance(value, dict):
+        return {
+            key: (REDACTED if _is_sensitive_key(key) else _redact_structure(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_structure(item) for item in value]
+    return value
+
+
+# Fallback for text that is neither valid JSON nor a form body: a JSON-ish
+# "key": value pair, or a bare key=value / key: value pair. The value runs to
+# the end of the line for a colon (so `Authorization: Bearer x` loses the whole
+# credential, not just the word "Bearer") and to the next separator otherwise.
+_SENSITIVE_TEXT = re.compile(
+    r'("?)([A-Za-z0-9_.\[\]-]*(?:'
+    + "|".join(part.replace("_", "[_-]?") for part in _SENSITIVE_KEY_PARTS)
+    + r')[A-Za-z0-9_.\[\]-]*)\1\s*(?::\s*(?:"(?:\\.|[^"\\])*"|[^\r\n,}\]]+)|=\s*(?:"(?:\\.|[^"\\])*"|[^&;\r\n]+))',
     re.I,
 )
+
+
+def _redact_form(text):
+    """
+    A form body or query string with sensitive values replaced.
+
+    Each pair is rewritten in place rather than re-encoded, so an attack
+    payload in a harmless field reaches the engine exactly as the client sent
+    it. Re-encoding the whole string percent-escaped the very characters the
+    engine is looking for.
+    """
+    out = []
+    for chunk in text.split("&"):
+        key, sep, _value = chunk.partition("=")
+        if sep and _is_sensitive_key(unquote_plus(key)):
+            out.append(f"{key}={REDACTED}")
+        else:
+            out.append(chunk)
+    return "&".join(out)
+
+
+def redact(text, form=False):
+    """
+    The text with credential values removed, whatever shape it is in.
+
+    The previous version was a single regex over a JSON string value, so a
+    form-encoded body, a bearer token in plain text, a non-string JSON value,
+    a key with an escaped quote in its value, and a body in any encoding other
+    than UTF-8 all forwarded the secret verbatim to another service.
+
+    `form` says the caller knows this is urlencoded (a form body, or a query
+    string). It is not guessed: prose containing an "=" was being parsed as a
+    form and re-encoded, which destroyed the attack signal the engine is asked
+    to look for.
+    """
+    if not text:
+        return text
+
+    if form:
+        return _redact_form(text)
+
+    stripped = text.lstrip()
+    if stripped[:1] in ("{", "["):
+        try:
+            return json.dumps(_redact_structure(json.loads(text)), separators=(",", ":"))
+        except (ValueError, TypeError, RecursionError):
+            pass
+
+    return _SENSITIVE_TEXT.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(1)}: {REDACTED}", text)
 
 
 class DefenderMiddleware:
@@ -100,6 +216,11 @@ class DefenderMiddleware:
         # Failures within a window, not consecutive ones. A counter reset by
         # every success never escalates on a half-dead engine, which is the
         # common case: half the traffic can go uninspected without a word.
+        # One middleware instance serves every worker thread, and the window
+        # was a read-modify-write across two statements: under load most
+        # failures were lost, so the alert fired late or not at all exactly
+        # when an outage mattered most.
+        self._lock = threading.Lock()
         self._recent_failures = []
         # None, not 0.0. time.monotonic() counts from an arbitrary point,
         # which on a freshly booted machine is near zero, so a 0.0 sentinel
@@ -125,7 +246,10 @@ class DefenderMiddleware:
             "path": meta.get("path") or request.path,
             "method": meta.get("method") or request.method,
             "user_agent": request.META.get("HTTP_USER_AGENT", ""),
-            "query": request.META.get("QUERY_STRING", ""),
+            # The query string was copied through with no redaction at all, so
+            # ?token=... reached the engine in clear while the same value in
+            # the body was replaced.
+            "query": redact(request.META.get("QUERY_STRING", ""), form=True),
             "body": body,
         }
 
@@ -143,7 +267,7 @@ class DefenderMiddleware:
         # The engine sends an explicit boolean. Reading only the action string
         # meant any spelling it did not recognise, including "deny" or "BLOCK",
         # was treated as permission.
-        refused = decision.get("allow") is False or action == "block"
+        refused = decision.get("allow") is False or action in _BLOCKING_ACTIONS
         throttled = action == "throttle"
 
         if refused:
@@ -244,9 +368,23 @@ class DefenderMiddleware:
             return "", None
 
         content_type = (request.META.get("CONTENT_TYPE") or "").split(";")[0].strip().lower()
+
+        if content_type == "multipart/form-data":
+            # Skipping multipart entirely was a complete bypass: the same
+            # payload that was inspected as JSON went uninspected as a form.
+            # The ordinary fields are read; request.FILES is not, so an upload
+            # is still never copied into another service.
+            try:
+                fields = list(request.POST.items())
+            except Exception as exc:  # pragma: no cover - defensive
+                return "", f"multipart body could not be inspected: {exc.__class__.__name__}"
+            if not fields:
+                return "", None
+            return self._trim(
+                redact(urlencode([(key, value) for key, value in fields]), form=True)
+            )
+
         if content_type and content_type not in INSPECTABLE_TYPES:
-            # A file upload is not forwarded. It would copy the whole file into
-            # another service and triple the memory cost of the request.
             return "", None
 
         try:
@@ -259,8 +397,25 @@ class DefenderMiddleware:
         if not raw:
             return "", None
 
-        text = raw[: self.max_body_bytes].decode("utf-8", errors="ignore")
-        return _SENSITIVE_VALUE.sub(r'\1"[redacted]"', text), None
+        text = raw.decode("utf-8", errors="ignore")
+
+        # Redact first, then truncate. The other order let a secret straddling
+        # the size limit lose its closing quote, miss the pattern, and be
+        # forwarded in clear.
+        text = redact(text, form=content_type == "application/x-www-form-urlencoded")
+        return self._trim(text)
+
+    def _trim(self, text):
+        if len(text) > self.max_body_bytes:
+            # Truncation used to be silent, so a padded payload was inspected
+            # in its first 64 KiB and reported as a clean inspection: the same
+            # walk-past-inspection this method already fixed once, at a lower
+            # threshold.
+            return (
+                text[: self.max_body_bytes],
+                f"request body was truncated at {self.max_body_bytes} bytes for inspection",
+            )
+        return text, None
 
     def _note_success(self):
         # The window is deliberately not cleared here. Clearing it on every
@@ -273,24 +428,33 @@ class DefenderMiddleware:
 
     def _record_failure(self, reason):
         now = time.monotonic()
-        self._last_outcome_failed = True
-        self._recent_failures = [
-            at for at in self._recent_failures if now - at < self.failure_window
-        ]
-        self._recent_failures.append(now)
 
-        if len(self._recent_failures) < self.failure_alert_threshold:
+        with self._lock:
+            self._last_outcome_failed = True
+            self._recent_failures = [
+                at for at in self._recent_failures if now - at < self.failure_window
+            ]
+            self._recent_failures.append(now)
+            failures = len(self._recent_failures)
+            escalate = failures >= self.failure_alert_threshold and (
+                self._last_alert is None or now - self._last_alert >= self.failure_window
+            )
+            if escalate:
+                self._last_alert = now
+
+        if failures < self.failure_alert_threshold:
             logger.warning("Defender engine gave no decision: %s", reason)
             return
 
         # Escalate, but not once per request: a real outage would otherwise
-        # fill the log at request rate.
-        if self._last_alert is None or now - self._last_alert >= self.failure_window:
-            self._last_alert = now
+        # fill the log at request rate. Between escalations the count keeps
+        # rising and is reported with the next one, so a continuing outage is
+        # never silent about its size.
+        if escalate:
             logger.error(
                 "Defender engine unavailable for %s of the last %ss: %s. "
                 "Requests are being allowed without a decision.",
-                len(self._recent_failures),
+                failures,
                 self.failure_window,
                 reason,
             )
