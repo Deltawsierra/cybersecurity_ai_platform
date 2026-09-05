@@ -138,10 +138,27 @@ ASGI_APPLICATION = "config.asgi.application"
 # DATABASE
 # -------------------------------------------------------------------
 
+# SQLite with the settings a server needs.
+#
+# The defaults are the ones for a single-user desktop program: rollback
+# journal, so one writer blocks every reader; no busy timeout, so a second
+# concurrent write raises "database is locked" immediately instead of waiting;
+# and deferred transactions, which take the write lock partway through and
+# cannot wait for it even when a timeout is set. Twenty concurrent scans
+# produced sixteen OperationalErrors on the stock configuration.
+#
+# WAL lets readers proceed while a writer holds the database, IMMEDIATE takes
+# the write lock at the start of the transaction so the timeout applies to it,
+# and the timeout gives a contending writer twenty seconds rather than none.
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": os.environ.get("DJANGO_DB_PATH") or BASE_DIR / "db.sqlite3",
+        "OPTIONS": {
+            "timeout": float(os.environ.get("DJANGO_DB_TIMEOUT", 20)),
+            "transaction_mode": "IMMEDIATE",
+            "init_command": "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+        },
     }
 }
 

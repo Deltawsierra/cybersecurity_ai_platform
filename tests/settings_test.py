@@ -7,16 +7,27 @@ the database, the mail backend, and the outbound engine.
 """
 
 import os
+import tempfile
 
 os.environ.setdefault("DJANGO_DEBUG", "1")
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-secret-key-not-used-outside-tests")
 
 from config.settings import *  # noqa: F401,F403
 
+# A file, not ":memory:". The in-memory backend uses a shared cache, and a
+# second thread writing to it raises "database table is locked" immediately
+# rather than waiting, so the concurrency tests could not run at all. A file
+# with WAL and a timeout behaves the way the deployed database does.
+_TEST_DB = os.path.join(tempfile.gettempdir(), "cybersecurity_ai_platform_tests.sqlite3")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
+        "NAME": _TEST_DB,
+        "TEST": {"NAME": _TEST_DB},
+        # The same options the deployed database uses, so a locking problem
+        # shows up here rather than only in production.
+        "OPTIONS": DATABASES["default"]["OPTIONS"],  # noqa: F405
     }
 }
 
