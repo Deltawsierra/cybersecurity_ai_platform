@@ -9,6 +9,9 @@ from .api_views import health
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Imported but never routed, so the desktop client's health probe and any
+    # load balancer check received a 404.
+    path("api/health/", health, name="health"),
 
     # Auth / JWT
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),

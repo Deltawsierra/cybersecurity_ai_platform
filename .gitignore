@@ -23,3 +23,22 @@ venv/
 
 .venv/
 venv/
+
+# Generated product output. Scan and audit reports are customer data by
+# definition; ten of them were committed to the repository root, along with the
+# debris of a mistyped curl command.
+*.pdf
+pentest_reports/
+media/
+
+# Build output
+dist/
+staticfiles/
+tsconfig.tsbuildinfo
+.pytest_cache/
+logs/
+
+# Secrets. Nothing in this family belongs in git.
+.env
+.env.*
+!.env.example

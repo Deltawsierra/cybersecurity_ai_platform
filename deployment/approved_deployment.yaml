@@ -1,0 +1,77 @@
+# What this deployment is approved to be.
+#
+# The eight components of the engine's assurance tuple. All eight must be
+# present: the engine refuses a partial tuple rather than filling the gaps
+# in, because a component that is absent is not "there are none", it is
+# "nobody said" -- and an undeclared component is one that can change
+# without the gate noticing. Say `null`, `[]` or `{}` to mean there are none.
+#
+# This file is the declared half. The engine adds a measured half from its
+# own process -- the extension inventory digest, the egress allowlist as
+# actually configured, and whether its own controls are switched on -- which
+# nothing here can state. That is deliberate: a declaration compared against
+# a declaration is a spelling check.
+#
+# To change what is approved: edit this file, have the change reviewed like
+# any other, and run
+#
+#     python manage.py approve_deployment --approved-by you@example.com
+#
+# against the engine the change is being approved for. The approval is
+# chained, so it cannot be back-dated or revised later without breaking every
+# approval after it.
+
+deployment_id: mythos-platform
+
+components:
+  # The model the engine reaches for, pinned by name and digest. A name alone
+  # is a claim the provider can silently change underneath.
+  model:
+    name: rule-and-ml-hybrid
+    artifact: ml_threat_model.json
+
+  # Prompts and retrieval are advisory in the engine's gate: they change in
+  # normal operation and are reported rather than blocked.
+  prompts:
+    templates: engine/ai_models/
+  retrieval: null
+
+  # Tools the engine may use. GRANTS: adding one widens what it can do.
+  tools:
+    - safe_http
+    - port_scanner
+    - subdomain_scanner
+    - defender
+
+  # Routes the platform exposes to the engine. Order is precedence.
+  routes:
+    - match: /api/scan
+      auth: required
+      roles: [operator]
+    - match: /api/llm-scan
+      auth: required
+      roles: [operator]
+    - match: /api/defend-log/*
+      auth: required
+      roles: [operator]
+
+  # RESTRICTS: these withhold. Note the nested allowlist -- adding a host to
+  # it is a widening and the gate now blocks on it, which it did not before
+  # the direction was applied per path rather than per component.
+  policies:
+    pii_redaction: true
+    require_engagement_scope: true
+    egress_allowlist: []
+
+  # EITHER: no safe direction, so any change is treated as widening. Removing
+  # the audit hook drops a control; adding one changes what runs.
+  hooks:
+    - audit_log
+    - effect_ledger
+
+  # GRANTS: adding one widens.
+  permissions:
+    - scans:launch
+    - scans:read
+    - findings:read
+    - evidence:export

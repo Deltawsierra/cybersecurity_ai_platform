@@ -1,0 +1,46 @@
+"""
+Settings for the test suite.
+
+Reuses the real settings so the tests exercise the real permission classes,
+serializers and querysets, and overrides only what a test run must not touch:
+the database, the mail backend, and the outbound engine.
+"""
+
+import os
+import tempfile
+
+os.environ.setdefault("DJANGO_DEBUG", "1")
+os.environ.setdefault("DJANGO_SECRET_KEY", "test-secret-key-not-used-outside-tests")
+
+from config.settings import *  # noqa: F401,F403
+
+# A file, not ":memory:". The in-memory backend uses a shared cache, and a
+# second thread writing to it raises "database table is locked" immediately
+# rather than waiting, so the concurrency tests could not run at all. A file
+# with WAL and a timeout behaves the way the deployed database does.
+_TEST_DB = os.path.join(tempfile.gettempdir(), "cybersecurity_ai_platform_tests.sqlite3")
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": _TEST_DB,
+        "TEST": {"NAME": _TEST_DB},
+        # The same options the deployed database uses, so a locking problem
+        # shows up here rather than only in production.
+        "OPTIONS": DATABASES["default"]["OPTIONS"],  # noqa: F405
+    }
+}
+
+# RequestFactory sends Host: testserver.
+ALLOWED_HOSTS = ["*"]
+
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+CYBERENGINE_URL = "http://127.0.0.1:8001"
+CYBERENGINE_OPERATOR_KEY = "test-operator-key"
+
+# The defender middleware makes an outbound call per request; the tests here
+# drive views directly, but leave it in monitor mode regardless.
+DEFENDER_MONITOR_ONLY = True
+
+# Throttling would make the ordering of tests significant.
+REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": {"anon": None, "user": None}}

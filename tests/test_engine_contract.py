@@ -5,11 +5,13 @@ import pytest
 ENGINE_URL = os.environ.get("CYBERENGINE_URL")
 ENGINE_KEY = os.environ.get("CYBERENGINE_OPERATOR_KEY")
 
-if not ENGINE_URL:
-    raise RuntimeError("CYBERENGINE_URL must be set for contract tests")
-
-if not ENGINE_KEY:
-    raise RuntimeError("CYBERENGINE_OPERATOR_KEY must be set for contract tests")
+# These raised at import, which aborted collection for the entire directory:
+# running `pytest` gathered zero tests and a red build, including the tests
+# that need no engine at all.
+pytestmark = pytest.mark.skipif(
+    not (ENGINE_URL and ENGINE_KEY),
+    reason="set CYBERENGINE_URL and CYBERENGINE_OPERATOR_KEY to run the contract tests",
+)
 
 HEADERS = {
     "X-API-Key": ENGINE_KEY,
