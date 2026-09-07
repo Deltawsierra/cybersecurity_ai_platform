@@ -210,3 +210,103 @@ class CyberEngineClient:
             )
 
         return resp.json()
+
+    # --------------------------------------------------
+    # GOVERNANCE
+    #
+    # Six subsystems the engine grew -- the assurance tuple and change gate,
+    # the authorization-to-effect ledger, the extension lifecycle gate, the
+    # decision twin and remediation replay, route attestation, and the
+    # incident evidence pack -- had no caller here at all. A grep of this
+    # repository for "assurance", "/api/extensions", "/api/authority" and
+    # "/api/evidence" returned nothing, so the change gate was consulted only
+    # by its own HTTP route and its own tests. extensions/gate.py names the
+    # realistic failure as "the engine ran for a week with a changed scanner
+    # and nobody read the endpoint"; that was not a risk, it was the shipped
+    # configuration.
+    # --------------------------------------------------
+
+    def assurance_check(self, deployment_id: str, components: dict,
+                        tenant_id: str = None) -> dict:
+        """Is the engine that is running still the one that was approved?
+
+        Answers 200 with a verdict rather than a status code, so read
+        `verdict`, not the HTTP result. The engine adds the measured half --
+        the extension inventory, the egress allowlist as actually configured,
+        and whether the other controls are switched on -- from its own
+        process; it cannot be sent from here, which is the point.
+        """
+        payload = {"deployment_id": deployment_id, "components": components}
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        return self._post("/api/assurance/check", payload)
+
+    def assurance_approve(self, deployment_id: str, components: dict,
+                          approved_by: str = None, note: str = None,
+                          tenant_id: str = None) -> dict:
+        """Record what this deployment looks like at the moment it is approved."""
+        payload = {"deployment_id": deployment_id, "components": components}
+        if approved_by:
+            payload["approved_by"] = approved_by
+        if note:
+            payload["note"] = note
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        return self._post("/api/assurance/approvals", payload)
+
+    def assurance_measured(self) -> dict:
+        """What the engine measures about itself, right now."""
+        return self._get("/api/assurance/measured")
+
+    def extension_review(self) -> dict:
+        """Whether every loaded extension is the one that was approved."""
+        return self._get("/api/extensions")
+
+    def unattributed_effects(self, limit: int = 100) -> dict:
+        """Effects the engine caused with no authority in force.
+
+        The audit query. Anything in it names a code path that reached the
+        network without one.
+        """
+        return self._get(f"/api/authority/unattributed?limit={limit}")
+
+    def attestation_check(self, name: str, url: str, tenant_id: str = None) -> dict:
+        """Measure a route now and compare it against its baseline."""
+        payload = {"name": name, "url": url}
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        return self._post("/api/attestation/check", payload)
+
+    def retest_finding(self, twin_id: int, engagement_ref: str,
+                       scope: list = None, tenant_id: str = None) -> dict:
+        """Is a finding still there?
+
+        `engagement_ref` is required by the engine: a retest reaches the
+        customer's system, and the authority for that has to be named now
+        rather than inherited from the decision being retested.
+        """
+        payload = {"twin_id": twin_id, "engagement_ref": engagement_ref}
+        if scope:
+            payload["scope"] = scope
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        return self._post("/api/remediation/retest", payload)
+
+    def evidence_pack(self, reason: str, since: str = None, until: str = None,
+                      run_id: str = None, engagement_ref: str = None,
+                      target: str = None, tenant_id: str = None,
+                      only_run: str = None) -> dict:
+        """Assemble a signed incident evidence pack.
+
+        `since` and `until` must be ISO 8601 instants. The engine refuses a
+        bound it cannot read rather than silently treating it as no bound,
+        which would produce a pack claiming a narrow window over everything
+        the tenant ever produced.
+        """
+        payload = {"reason": reason}
+        for key, value in (("since", since), ("until", until), ("run_id", run_id),
+                           ("engagement_ref", engagement_ref), ("target", target),
+                           ("tenant_id", tenant_id), ("only_run", only_run)):
+            if value:
+                payload[key] = value
+        return self._post("/api/evidence/pack", payload)

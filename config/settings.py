@@ -278,6 +278,15 @@ CYBERENGINE_URL = os.environ.get(
 
 CYBERENGINE_OPERATOR_KEY = os.environ.get("CYBERENGINE_OPERATOR_KEY")
 
+# Whether a scan is refused when the engine is not the deployment that was
+# approved. Defaults to observe, matching the engine's own extension gate: a
+# gate that blocks on the day it is switched on, in a deployment nobody has
+# approved yet, is one somebody turns off -- and a gate that is off is worse
+# than no gate, because the record says it was on. In observe a blocked
+# verdict is logged and the scan proceeds, so the record shows what would
+# have been refused before anyone relies on it refusing.
+CYBERENGINE_ASSURANCE_MODE = os.environ.get("CYBERENGINE_ASSURANCE_MODE", "observe")
+
 # -------------------------------------------------------------------
 # AI DEFENDER (SAFE MODE) NOT AI LOGIC JUST A SAFETY SWITCH
 # -------------------------------------------------------------------
