@@ -25,6 +25,36 @@ SCAN_POLL_SECONDS = float(getattr(django_settings, "CYBERENGINE_POLL_INTERVAL", 
 SCAN_INLINE_WAIT_SECONDS = 20.0
 
 
+# The engine's response body reaches a Django JSONField and an HTTP response,
+# so an error message that interpolates the whole of it is an unbounded write
+# on a control channel this process trusts by construction.
+MAX_ERROR_BODY = 500
+
+
+def _decode(resp) -> dict:
+    """The JSON body, or an EngineError naming what came back instead.
+
+    resp.json() used to sit outside the try in both _get and _post, so a 200
+    carrying an HTML error page from a reverse proxy, a captive portal, or a
+    truncated response raised JSONDecodeError straight out of the caller --
+    through preflight, which catches EngineError, and out of the view as a
+    500. audit/middleware.py already wraps its own response.json() in an
+    except ValueError for exactly this reason.
+    """
+    try:
+        parsed = resp.json()
+    except ValueError as exc:
+        raise EngineError(
+            f"the engine returned a body that is not JSON "
+            f"({resp.headers.get('content-type', 'no content-type')}): {exc}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise EngineError(
+            f"the engine returned a {type(parsed).__name__}, not an object"
+        )
+    return parsed
+
+
 class EngineError(Exception):
     pass
 
@@ -78,9 +108,11 @@ class CyberEngineClient:
             raise EngineError(f"Engine unreachable: {e}")
 
         if not (200 <= resp.status_code < 300):
-            raise EngineError(f"Engine error {resp.status_code}: {resp.text}")
+            raise EngineError(
+                f"Engine error {resp.status_code}: {resp.text[:MAX_ERROR_BODY]}"
+            )
 
-        return resp.json()
+        return _decode(resp)
 
     def _post(self, path: str, payload: dict) -> dict:
         try:
@@ -98,10 +130,10 @@ class CyberEngineClient:
 
         if not (200 <= resp.status_code < 300):
             raise EngineError(
-                f"Engine error {resp.status_code}: {resp.text}"
+                f"Engine error {resp.status_code}: {resp.text[:MAX_ERROR_BODY]}"
             )
 
-        return resp.json()
+        return _decode(resp)
 
     # --------------------------------------------------
     # ENGINE ENDPOINTS
@@ -206,10 +238,10 @@ class CyberEngineClient:
 
         if not (200 <= resp.status_code < 300):
             raise EngineError(
-                f"Engine error {resp.status_code}: {resp.text}"
+                f"Engine error {resp.status_code}: {resp.text[:MAX_ERROR_BODY]}"
             )
 
-        return resp.json()
+        return _decode(resp)
 
     # --------------------------------------------------
     # GOVERNANCE
