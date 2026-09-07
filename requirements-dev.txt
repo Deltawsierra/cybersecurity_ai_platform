@@ -10,5 +10,10 @@ djangorestframework_simplejwt==5.5.1
 django-cors-headers==4.7.0
 requests==2.32.5
 reportlab==4.4.3
+# deployment/approved_deployment.yaml is read at scan launch, so the
+# checks and the tests need this too. It is in requirements.txt; the
+# light set is what CI installs, and leaving it out took the whole URL
+# conf down rather than just the governance check.
+PyYAML==6.0.2
 pytest>=8.0
 pytest-django>=4.8

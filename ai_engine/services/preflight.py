@@ -36,7 +36,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import yaml
 from django.conf import settings
 
 from ai_engine.services.cyberengine_client import CyberEngineClient, EngineError
@@ -63,10 +62,24 @@ class DeploymentNotApproved(Exception):
 def declaration() -> Dict[str, Any]:
     """The approved deployment, as declared in the repository.
 
+    yaml is imported here rather than at module scope. This module is
+    imported by pentest.views, which is imported by pentest.urls, which is
+    imported by the root URL conf -- so a missing dependency in a governance
+    check took down every route in the application rather than the check. A
+    gate that cannot answer should refuse scans, not the login page.
+
     Read from disk each time rather than cached at import: a deployment that
     edits this file and restarts one worker should not have two workers
     disagreeing about what was approved.
     """
+    try:
+        import yaml
+    except ImportError as exc:  # pragma: no cover - a packaging error, not a path
+        raise DeploymentNotApproved(
+            f"PyYAML is not installed, so {DECLARATION.name} cannot be read and "
+            f"nothing can say what this deployment is approved to be: {exc}"
+        ) from exc
+
     if not DECLARATION.exists():
         raise DeploymentNotApproved(
             f"{DECLARATION} does not exist, so there is nothing that says what "

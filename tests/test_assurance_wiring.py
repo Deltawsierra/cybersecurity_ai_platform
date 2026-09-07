@@ -206,3 +206,30 @@ def test_the_declaration_names_every_component_the_engine_requires(self=None):
         "model", "prompts", "tools", "routes",
         "retrieval", "policies", "hooks", "permissions",
     }
+
+
+def test_a_missing_yaml_refuses_the_gate_and_not_the_whole_application():
+    """
+    preflight is imported by pentest.views, which is imported by pentest.urls,
+    which is imported by the root URL conf. A module-scope `import yaml` there
+    meant a dependency missing from the light requirements set took down every
+    route in the application -- the login page included -- rather than the
+    governance check. CI caught it as ModuleNotFoundError during URL loading.
+
+    A gate that cannot answer should refuse scans, not the front door.
+    """
+    import builtins
+    from unittest import mock
+
+    real_import = builtins.__import__
+
+    def no_yaml(name, *args, **kwargs):
+        if name == "yaml":
+            raise ImportError("No module named 'yaml'")
+        return real_import(name, *args, **kwargs)
+
+    with mock.patch.object(builtins, "__import__", side_effect=no_yaml):
+        with pytest.raises(preflight.DeploymentNotApproved) as refusal:
+            preflight.declaration()
+
+    assert "PyYAML" in str(refusal.value)
